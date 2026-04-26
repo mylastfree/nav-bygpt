@@ -15,17 +15,29 @@ import {
   saveDashboard,
 } from './api'
 import {
+  CARD_LAYOUT_OPTIONS,
+  GROUP_COLOR_OPTIONS,
+  WALLPAPER_INTENSITY_OPTIONS,
+  WALLPAPER_PRESET_OPTIONS,
   createGroupFromName,
   createLinkFromInput,
   faviconUrl,
   incrementLinkClickCount,
   isSafeUrl,
   moveItem,
+  nextThemePreference,
   normalizeUrl,
   reorderLinkInGroup,
 } from './dashboard'
 import { isImportFileTooLarge, parseDashboardImport } from './importers'
-import type { DashboardData, LinkItem } from './types'
+import type {
+  CardLayout,
+  DashboardData,
+  GroupColor,
+  LinkItem,
+  WallpaperIntensity,
+  WallpaperPreset,
+} from './types'
 
 type QuickEditDraft =
   | {
@@ -43,6 +55,36 @@ type QuickEditDraft =
       url: string
       icon: string
     }
+
+const cardLayoutLabels: Record<CardLayout, string> = {
+  comfortable: '舒适卡片',
+  compact: '紧凑卡片',
+  list: '列表模式',
+}
+
+const wallpaperPresetLabels: Record<WallpaperPreset, string> = {
+  none: '无背景',
+  paper: '柔和纸面',
+  'dark-desk': '深色工作台',
+  'blue-gray': '清晨蓝灰',
+  'soft-green': '绿色护眼',
+  'warm-gray': '暖灰',
+}
+
+const wallpaperIntensityLabels: Record<WallpaperIntensity, string> = {
+  normal: '标准',
+  soft: '更淡',
+}
+
+const groupColorLabels: Record<GroupColor, string> = {
+  slate: '灰',
+  blue: '蓝',
+  green: '绿',
+  amber: '黄',
+  rose: '红',
+  purple: '紫',
+  teal: '青',
+}
 
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
@@ -85,6 +127,12 @@ function App() {
   useEffect(() => {
     if (dashboard) {
       document.documentElement.dataset.theme = dashboard.settings.theme
+      document.documentElement.dataset.cardLayout =
+        dashboard.settings.cardLayout ?? 'comfortable'
+      document.documentElement.dataset.wallpaper =
+        dashboard.settings.wallpaper?.preset ?? 'none'
+      document.documentElement.dataset.wallpaperIntensity =
+        dashboard.settings.wallpaper?.intensity ?? 'normal'
       document.title = dashboard.settings.title
     }
   }, [dashboard])
@@ -476,6 +524,47 @@ function App() {
     }))
   }
 
+  function updateWallpaper<K extends keyof NonNullable<DashboardData['settings']['wallpaper']>>(
+    key: K,
+    value: NonNullable<DashboardData['settings']['wallpaper']>[K],
+  ) {
+    updateDashboard((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        wallpaper: {
+          preset: current.settings.wallpaper?.preset ?? 'none',
+          intensity: current.settings.wallpaper?.intensity ?? 'normal',
+          [key]: value,
+        },
+      },
+    }))
+  }
+
+  function updateGroupColor(groupId: string, color: GroupColor) {
+    updateDashboard((current) => ({
+      ...current,
+      groups: current.groups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              color,
+            }
+          : group,
+      ),
+    }))
+  }
+
+  function toggleFrontTheme() {
+    if (!dashboard) {
+      return
+    }
+
+    const theme = nextThemePreference(dashboard.settings.theme)
+    updateSetting('theme', theme)
+    setStatus(theme === 'dark' ? '已切换到深色，保存后写入 KV' : '已切换到浅色，保存后写入 KV')
+  }
+
   function exportJson() {
     if (!dashboard) {
       return
@@ -557,6 +646,15 @@ function App() {
             placeholder="搜索网站"
             aria-label="搜索网站"
           />
+          <button
+            type="button"
+            className="icon-button theme-toggle-button"
+            onClick={toggleFrontTheme}
+            aria-label={dashboard.settings.theme === 'dark' ? '切换浅色' : '切换深色'}
+            title={dashboard.settings.theme === 'dark' ? '切换浅色' : '切换深色'}
+          >
+            {dashboard.settings.theme === 'dark' ? '☀' : '☾'}
+          </button>
 
           {isEditing ? (
             <>
@@ -643,13 +741,93 @@ function App() {
         </section>
       ) : null}
 
+      {isEditing ? (
+        <section className="notice-panel appearance-panel">
+          <div className="maintenance-heading">
+            <div>
+              <strong>外观</strong>
+              <span>调整卡片密度、背景和当前分组颜色。</span>
+            </div>
+          </div>
+          <div className="appearance-grid">
+            <label className="field-label">
+              卡片布局
+              <select
+                className="select-input"
+                value={dashboard.settings.cardLayout ?? 'comfortable'}
+                onChange={(event) =>
+                  updateSetting('cardLayout', event.target.value as CardLayout)
+                }
+              >
+                {CARD_LAYOUT_OPTIONS.map((layout) => (
+                  <option value={layout} key={layout}>
+                    {cardLayoutLabels[layout]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              背景
+              <select
+                className="select-input"
+                value={dashboard.settings.wallpaper?.preset ?? 'none'}
+                onChange={(event) =>
+                  updateWallpaper('preset', event.target.value as WallpaperPreset)
+                }
+              >
+                {WALLPAPER_PRESET_OPTIONS.map((preset) => (
+                  <option value={preset} key={preset}>
+                    {wallpaperPresetLabels[preset]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              背景强度
+              <select
+                className="select-input"
+                value={dashboard.settings.wallpaper?.intensity ?? 'normal'}
+                onChange={(event) =>
+                  updateWallpaper('intensity', event.target.value as WallpaperIntensity)
+                }
+              >
+                {WALLPAPER_INTENSITY_OPTIONS.map((intensity) => (
+                  <option value={intensity} key={intensity}>
+                    {wallpaperIntensityLabels[intensity]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {activeGroup ? (
+              <div className="field-label">
+                当前分组颜色
+                <div className="color-swatch-row" role="group" aria-label="当前分组颜色">
+                  {GROUP_COLOR_OPTIONS.map((color) => (
+                    <button
+                      type="button"
+                      className={`color-swatch is-color-${color} ${
+                        (activeGroup.color ?? 'slate') === color ? 'is-selected' : ''
+                      }`}
+                      onClick={() => updateGroupColor(activeGroup.id, color)}
+                      aria-label={`设置分组颜色：${groupColorLabels[color]}`}
+                      title={groupColorLabels[color]}
+                      key={color}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       <section className="dashboard-layout">
         <aside className="group-sidebar" aria-label="分组">
           <div className="sidebar-label">分组</div>
           <div className="group-tabs">
             {dashboard.groups.map((group) => (
               <div
-                className={`group-tab ${
+                className={`group-tab is-color-${group.color ?? 'slate'} ${
                   group.id === activeGroup?.id ? 'is-active' : ''
                 }`}
                 key={group.id}
