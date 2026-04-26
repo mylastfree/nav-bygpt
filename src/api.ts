@@ -38,8 +38,6 @@ export async function saveDashboard(
     updatedAt: new Date().toISOString(),
   })
 
-  saveLocalDashboard(updated)
-
   const invalidLinks = findInvalidLinks(updated)
   if (invalidLinks.length > 0) {
     throw new Error(`存在无效网址：${invalidLinks[0]}`)
@@ -61,6 +59,7 @@ export async function saveDashboard(
 
     if (response.ok) {
       const result = (await response.json()) as SaveResult
+      saveLocalDashboard(updated)
       return {
         mode: 'cloud',
         updatedAt: result.updatedAt || updated.updatedAt,
@@ -68,6 +67,7 @@ export async function saveDashboard(
     }
 
     if (response.status === 404) {
+      saveLocalDashboard(updated)
       return {
         mode: 'local',
         updatedAt: updated.updatedAt,
@@ -78,6 +78,7 @@ export async function saveDashboard(
     throw new Error(message || `保存失败，HTTP ${response.status}`)
   } catch (error) {
     if (error instanceof TypeError) {
+      saveLocalDashboard(updated)
       return {
         mode: 'local',
         updatedAt: updated.updatedAt,

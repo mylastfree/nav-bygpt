@@ -1,8 +1,21 @@
 const DASHBOARD_KEY = 'dashboard'
 const BACKUP_PREFIX = 'backup:'
-const MAX_BODY_BYTES = 200000
-const MAX_GROUPS = 80
-const MAX_LINKS_PER_GROUP = 300
+const MAX_BODY_BYTES = 10 * 1024 * 1024
+const MAX_GROUPS = 500
+const MAX_TOTAL_LINKS = 5000
+const MAX_LINKS_PER_GROUP = 1000
+
+const CARD_LAYOUT_OPTIONS = ['comfortable', 'compact', 'list']
+const GROUP_COLOR_OPTIONS = ['slate', 'blue', 'green', 'amber', 'rose', 'purple', 'teal']
+const WALLPAPER_PRESET_OPTIONS = [
+  'none',
+  'paper',
+  'dark-desk',
+  'blue-gray',
+  'soft-green',
+  'warm-gray',
+]
+const WALLPAPER_INTENSITY_OPTIONS = ['normal', 'soft']
 
 const defaultDashboard = {
   version: 1,
@@ -10,21 +23,29 @@ const defaultDashboard = {
   settings: {
     title: '我的导航',
     theme: 'system',
+    cardLayout: 'comfortable',
+    wallpaper: {
+      preset: 'none',
+      intensity: 'normal',
+    },
   },
   groups: [
     {
       id: 'daily',
       name: '常用',
+      color: 'blue',
       links: [
         {
           id: 'cloudflare',
           title: 'Cloudflare',
           url: 'https://dash.cloudflare.com',
+          clickCount: 0,
         },
         {
           id: 'github',
           title: 'GitHub',
           url: 'https://github.com',
+          clickCount: 0,
         },
       ],
     },
@@ -79,7 +100,7 @@ async function writeDashboard(request, env, context) {
   }
 
   const body = await request.text()
-  if (body.length > MAX_BODY_BYTES) {
+  if (new TextEncoder().encode(body).length > MAX_BODY_BYTES) {
     return text('Dashboard JSON is too large.', 413)
   }
 
@@ -144,9 +165,14 @@ function validateDashboard(input) {
       theme: ['light', 'dark', 'system'].includes(settings.theme)
         ? settings.theme
         : 'system',
+      cardLayout: normalizeCardLayout(settings.cardLayout),
+      wallpaper: normalizeWallpaper(settings.wallpaper),
     },
     groups: [],
   }
+  const usedGroupIds = new Set()
+  const usedLinkIds = new Set()
+  let totalLinks = 0
 
   for (const group of groups) {
     if (!group || typeof group !== 'object') {
@@ -164,9 +190,15 @@ function validateDashboard(input) {
       }
     }
 
+    totalLinks += group.links.length
+    if (totalLinks > MAX_TOTAL_LINKS) {
+      return { ok: false, error: `Too many links. Max is ${MAX_TOTAL_LINKS}.` }
+    }
+
     const nextGroup = {
-      id: cleanText(group.id, 80) || crypto.randomUUID(),
+      id: createUniqueId('group', usedGroupIds, group.id),
       name: cleanText(group.name, 80) || '未命名分组',
+      color: normalizeGroupColor(group.color),
       links: [],
     }
 
@@ -176,7 +208,7 @@ function validateDashboard(input) {
       }
 
       const normalizedUrl = normalizeUrl(cleanText(link.url, 2048))
-      const icon = cleanText(link.icon, 2048)
+      const icon = cleanText(link.icon, 8192)
 
       if (!isSafeUrl(normalizedUrl)) {
         return {
@@ -185,7 +217,7 @@ function validateDashboard(input) {
         }
       }
 
-      if (icon && !isSafeUrl(icon)) {
+      if (icon && !isSafeIcon(icon)) {
         return {
           ok: false,
           error: `Invalid icon URL: ${cleanText(link.title, 80) || normalizedUrl}`,
@@ -193,10 +225,12 @@ function validateDashboard(input) {
       }
 
       nextGroup.links.push({
-        id: cleanText(link.id, 80) || crypto.randomUUID(),
+        id: createUniqueId('link', usedLinkIds, link.id),
         title: cleanText(link.title, 80) || hostnameFromUrl(normalizedUrl),
         url: normalizedUrl,
         icon: icon || undefined,
+        clickCount: normalizeClickCount(link.clickCount),
+        check: normalizeLinkHealth(link.check),
       })
     }
 
@@ -204,6 +238,89 @@ function validateDashboard(input) {
   }
 
   return { ok: true, data }
+}
+
+function createId(prefix) {
+  const random =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10)
+
+  return `${prefix}-${random}`
+}
+
+function createUniqueId(prefix, usedIds, preferredId) {
+  const normalized = cleanText(preferredId, 80)
+
+  if (normalized && !usedIds.has(normalized)) {
+    usedIds.add(normalized)
+    return normalized
+  }
+
+  let generated = createId(prefix)
+  while (usedIds.has(generated)) {
+    generated = createId(prefix)
+  }
+
+  usedIds.add(generated)
+  return generated
+}
+
+function normalizeCardLayout(value) {
+  return CARD_LAYOUT_OPTIONS.includes(value) ? value : 'comfortable'
+}
+
+function normalizeGroupColor(value) {
+  return GROUP_COLOR_OPTIONS.includes(value) ? value : 'slate'
+}
+
+function normalizeWallpaper(value) {
+  const wallpaper = value && typeof value === 'object' ? value : {}
+  const preset = WALLPAPER_PRESET_OPTIONS.includes(wallpaper.preset)
+    ? wallpaper.preset
+    : 'none'
+  const intensity = WALLPAPER_INTENSITY_OPTIONS.includes(wallpaper.intensity)
+    ? wallpaper.intensity
+    : 'normal'
+
+  return {
+    preset,
+    intensity,
+  }
+}
+
+function normalizeClickCount(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0
+}
+
+function normalizeLinkHealth(value) {
+  if (!value || typeof value !== 'object') {
+    return undefined
+  }
+
+  const status = value.status
+  const reason = cleanText(value.reason, 120)
+  const checkedAt = typeof value.checkedAt === 'string' ? value.checkedAt : ''
+  const confirmedAt =
+    typeof value.confirmedAt === 'string' && value.confirmedAt
+      ? value.confirmedAt
+      : undefined
+
+  if (
+    (status !== 'ok' && status !== 'limited' && status !== 'broken') ||
+    !checkedAt
+  ) {
+    return undefined
+  }
+
+  return {
+    status,
+    reason,
+    checkedAt,
+    confirmedAt,
+  }
 }
 
 function normalizeUrl(value) {
@@ -223,6 +340,10 @@ function isSafeUrl(value) {
   } catch {
     return false
   }
+}
+
+function isSafeIcon(value) {
+  return isSafeUrl(value) || /^data:image\/[a-z0-9.+-]+;base64,/i.test(value)
 }
 
 function hostnameFromUrl(value) {

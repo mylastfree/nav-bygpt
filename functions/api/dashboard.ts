@@ -1,18 +1,33 @@
+type LinkHealth = {
+  status: 'ok' | 'limited' | 'broken'
+  reason: string
+  checkedAt: string
+  confirmedAt?: string
+}
+
 type DashboardData = {
   version: 1
   updatedAt: string
   settings: {
     title: string
     theme: 'light' | 'dark' | 'system'
+    cardLayout?: 'comfortable' | 'compact' | 'list'
+    wallpaper?: {
+      preset: 'none' | 'paper' | 'dark-desk' | 'blue-gray' | 'soft-green' | 'warm-gray'
+      intensity: 'normal' | 'soft'
+    }
   }
   groups: Array<{
     id: string
     name: string
+    color?: 'slate' | 'blue' | 'green' | 'amber' | 'rose' | 'purple' | 'teal'
     links: Array<{
       id: string
       title: string
       url: string
       icon?: string
+      clickCount?: number
+      check?: LinkHealth
     }>
   }>
 }
@@ -43,9 +58,22 @@ type PagesContext = {
 
 const DASHBOARD_KEY = 'dashboard'
 const BACKUP_PREFIX = 'backup:'
-const MAX_BODY_BYTES = 200_000
-const MAX_GROUPS = 80
-const MAX_LINKS_PER_GROUP = 300
+const MAX_BODY_BYTES = 10 * 1024 * 1024
+const MAX_GROUPS = 500
+const MAX_TOTAL_LINKS = 5000
+const MAX_LINKS_PER_GROUP = 1000
+
+const CARD_LAYOUT_OPTIONS = ['comfortable', 'compact', 'list'] as const
+const GROUP_COLOR_OPTIONS = ['slate', 'blue', 'green', 'amber', 'rose', 'purple', 'teal'] as const
+const WALLPAPER_PRESET_OPTIONS = [
+  'none',
+  'paper',
+  'dark-desk',
+  'blue-gray',
+  'soft-green',
+  'warm-gray',
+] as const
+const WALLPAPER_INTENSITY_OPTIONS = ['normal', 'soft'] as const
 
 const defaultDashboard: DashboardData = {
   version: 1,
@@ -53,21 +81,29 @@ const defaultDashboard: DashboardData = {
   settings: {
     title: '我的导航',
     theme: 'system',
+    cardLayout: 'comfortable',
+    wallpaper: {
+      preset: 'none',
+      intensity: 'normal',
+    },
   },
   groups: [
     {
       id: 'daily',
       name: '常用',
+      color: 'blue',
       links: [
         {
           id: 'cloudflare',
           title: 'Cloudflare',
           url: 'https://dash.cloudflare.com',
+          clickCount: 0,
         },
         {
           id: 'github',
           title: 'GitHub',
           url: 'https://github.com',
+          clickCount: 0,
         },
       ],
     },
@@ -104,7 +140,7 @@ export async function onRequestPut(context: PagesContext) {
   }
 
   const body = await request.text()
-  if (body.length > MAX_BODY_BYTES) {
+  if (new TextEncoder().encode(body).length > MAX_BODY_BYTES) {
     return text('Dashboard JSON is too large.', 413)
   }
 
@@ -156,7 +192,7 @@ function validateDashboard(input: unknown):
 
   const record = input as Record<string, unknown>
   const groups = record.groups
-  const settings = record.settings as Record<string, unknown> | undefined
+  const settings = (record.settings || {}) as Record<string, unknown>
 
   if (!Array.isArray(groups)) {
     return { ok: false, error: 'Dashboard groups must be an array.' }
@@ -166,16 +202,21 @@ function validateDashboard(input: unknown):
     return { ok: false, error: `Too many groups. Max is ${MAX_GROUPS}.` }
   }
 
-  const theme = settings?.theme
+  const theme = settings.theme
   const data: DashboardData = {
     version: 1,
     updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
     settings: {
-      title: cleanText(settings?.title, 80) || '我的导航',
+      title: cleanText(settings.title, 80) || '我的导航',
       theme: theme === 'light' || theme === 'dark' || theme === 'system' ? theme : 'system',
+      cardLayout: normalizeCardLayout(settings.cardLayout),
+      wallpaper: normalizeWallpaper(settings.wallpaper),
     },
     groups: [],
   }
+  const usedGroupIds = new Set<string>()
+  const usedLinkIds = new Set<string>()
+  let totalLinks = 0
 
   for (const group of groups) {
     if (!group || typeof group !== 'object') {
@@ -196,9 +237,15 @@ function validateDashboard(input: unknown):
       }
     }
 
+    totalLinks += links.length
+    if (totalLinks > MAX_TOTAL_LINKS) {
+      return { ok: false, error: `Too many links. Max is ${MAX_TOTAL_LINKS}.` }
+    }
+
     const nextGroup: DashboardData['groups'][number] = {
-      id: cleanText(groupRecord.id, 80) || crypto.randomUUID(),
+      id: createUniqueId('group', usedGroupIds, groupRecord.id),
       name: cleanText(groupRecord.name, 80) || '未命名分组',
+      color: normalizeGroupColor(groupRecord.color),
       links: [],
     }
 
@@ -209,7 +256,7 @@ function validateDashboard(input: unknown):
 
       const linkRecord = link as Record<string, unknown>
       const normalizedUrl = normalizeUrl(cleanText(linkRecord.url, 2048))
-      const icon = cleanText(linkRecord.icon, 2048)
+      const icon = cleanText(linkRecord.icon, 8192)
 
       if (!isSafeUrl(normalizedUrl)) {
         return {
@@ -218,7 +265,7 @@ function validateDashboard(input: unknown):
         }
       }
 
-      if (icon && !isSafeUrl(icon)) {
+      if (icon && !isSafeIcon(icon)) {
         return {
           ok: false,
           error: `Invalid icon URL: ${cleanText(linkRecord.title, 80) || normalizedUrl}`,
@@ -226,10 +273,12 @@ function validateDashboard(input: unknown):
       }
 
       nextGroup.links.push({
-        id: cleanText(linkRecord.id, 80) || crypto.randomUUID(),
+        id: createUniqueId('link', usedLinkIds, linkRecord.id),
         title: cleanText(linkRecord.title, 80) || hostnameFromUrl(normalizedUrl),
         url: normalizedUrl,
         icon: icon || undefined,
+        clickCount: normalizeClickCount(linkRecord.clickCount),
+        check: normalizeLinkHealth(linkRecord.check),
       })
     }
 
@@ -237,6 +286,102 @@ function validateDashboard(input: unknown):
   }
 
   return { ok: true, data }
+}
+
+function createId(prefix: string) {
+  const random =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10)
+
+  return `${prefix}-${random}`
+}
+
+function createUniqueId(prefix: string, usedIds: Set<string>, preferredId: unknown) {
+  const normalized = cleanText(preferredId, 80)
+
+  if (normalized && !usedIds.has(normalized)) {
+    usedIds.add(normalized)
+    return normalized
+  }
+
+  let generated = createId(prefix)
+  while (usedIds.has(generated)) {
+    generated = createId(prefix)
+  }
+
+  usedIds.add(generated)
+  return generated
+}
+
+function normalizeCardLayout(value: unknown): NonNullable<DashboardData['settings']['cardLayout']> {
+  return CARD_LAYOUT_OPTIONS.includes(
+    value as NonNullable<DashboardData['settings']['cardLayout']>,
+  )
+    ? (value as NonNullable<DashboardData['settings']['cardLayout']>)
+    : 'comfortable'
+}
+
+function normalizeGroupColor(value: unknown): NonNullable<DashboardData['groups'][number]['color']> {
+  return GROUP_COLOR_OPTIONS.includes(
+    value as NonNullable<DashboardData['groups'][number]['color']>,
+  )
+    ? (value as NonNullable<DashboardData['groups'][number]['color']>)
+    : 'slate'
+}
+
+function normalizeWallpaper(value: unknown): NonNullable<DashboardData['settings']['wallpaper']> {
+  const wallpaper = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const preset = WALLPAPER_PRESET_OPTIONS.includes(
+    wallpaper.preset as NonNullable<DashboardData['settings']['wallpaper']>['preset'],
+  )
+    ? (wallpaper.preset as NonNullable<DashboardData['settings']['wallpaper']>['preset'])
+    : 'none'
+  const intensity = WALLPAPER_INTENSITY_OPTIONS.includes(
+    wallpaper.intensity as NonNullable<DashboardData['settings']['wallpaper']>['intensity'],
+  )
+    ? (wallpaper.intensity as NonNullable<DashboardData['settings']['wallpaper']>['intensity'])
+    : 'normal'
+
+  return {
+    preset,
+    intensity,
+  }
+}
+
+function normalizeClickCount(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0
+}
+
+function normalizeLinkHealth(value: unknown): LinkHealth | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined
+  }
+
+  const health = value as Record<string, unknown>
+  const status = health.status
+  const reason = cleanText(health.reason, 120)
+  const checkedAt = typeof health.checkedAt === 'string' ? health.checkedAt : ''
+  const confirmedAt =
+    typeof health.confirmedAt === 'string' && health.confirmedAt
+      ? health.confirmedAt
+      : undefined
+
+  if (
+    (status !== 'ok' && status !== 'limited' && status !== 'broken') ||
+    !checkedAt
+  ) {
+    return undefined
+  }
+
+  return {
+    status,
+    reason,
+    checkedAt,
+    confirmedAt,
+  }
 }
 
 function normalizeUrl(value: string) {
@@ -255,6 +400,10 @@ function isSafeUrl(value: string) {
   } catch {
     return false
   }
+}
+
+function isSafeIcon(value: string) {
+  return isSafeUrl(value) || /^data:image\/[a-z0-9.+-]+;base64,/i.test(value)
 }
 
 function hostnameFromUrl(value: string) {

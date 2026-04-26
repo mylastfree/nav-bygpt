@@ -1,11 +1,12 @@
 {
   "name": "cf-startpage",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
     "preview": "vite preview",
     "cf:dev": "npm run build && npx wrangler pages dev dist --kv STARTPAGE_KV --binding ADMIN_TOKEN=dev-secret",
     "cf:deploy": "npm run build && npx wrangler pages deploy dist --project-name cf-startpage",
@@ -21,6 +22,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "typescript": "~6.0.2",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   }
 }

@@ -13,8 +13,8 @@ import {
   isSafeUrl,
   moveItem,
   normalizeUrl,
-  sanitizeDashboard,
 } from './dashboard'
+import { isImportFileTooLarge, parseDashboardImport } from './importers'
 import type { DashboardData, LinkItem } from './types'
 
 function App() {
@@ -337,12 +337,22 @@ function App() {
     }
 
     try {
+      if (isImportFileTooLarge(file)) {
+        setStatus('导入失败，文件不能超过 10MB')
+        return
+      }
+
       const text = await file.text()
-      const imported = sanitizeDashboard(JSON.parse(text))
-      setDashboard(imported)
-      setStatus('已导入 JSON，点击保存后写入 Cloudflare KV')
-    } catch {
-      setStatus('导入失败，请检查 JSON 文件')
+      const result = parseDashboardImport(file.name, text)
+      const skippedText =
+        result.skipped.length > 0 ? `，跳过 ${result.skipped.length} 条无效地址` : ''
+
+      setDashboard(result.dashboard)
+      setStatus(
+        `已导入 ${result.groupCount} 个分组、${result.linkCount} 个网站${skippedText}，点击保存后写入 Cloudflare KV`,
+      )
+    } catch (error) {
+      setStatus(error instanceof Error ? `导入失败：${error.message}` : '导入失败，请检查文件')
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
@@ -467,7 +477,7 @@ function App() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/json,.json"
+            accept="application/json,.json,.itabdata"
             hidden
             onChange={(event) => importJson(event.target.files?.[0])}
           />
