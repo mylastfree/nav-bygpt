@@ -239,7 +239,10 @@ button:focus-visible {
 .primary-button,
 .ghost-button,
 .icon-button,
+.quick-icon-button,
 .add-link-button,
+.add-card,
+.group-add-tab,
 .group-tab {
   min-height: 40px;
   border: 1px solid transparent;
@@ -255,7 +258,10 @@ button:focus-visible {
 .primary-button:hover,
 .ghost-button:hover,
 .icon-button:hover,
+.quick-icon-button:hover,
 .add-link-button:hover,
+.add-card:hover,
+.group-add-tab:hover,
 .group-tab:hover {
   transform: translateY(-1px);
 }
@@ -302,6 +308,21 @@ button:focus-visible {
   font-weight: 780;
 }
 
+.quick-icon-button {
+  display: inline-grid;
+  width: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  place-items: center;
+  border-color: color-mix(in srgb, var(--border), transparent 10%);
+  background: color-mix(in srgb, var(--surface), transparent 6%);
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .dashboard-layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -339,9 +360,10 @@ button:focus-visible {
 }
 
 .group-tab {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   width: 100%;
   padding: 10px 11px;
@@ -359,6 +381,19 @@ button:focus-visible {
   background: var(--primary);
   color: var(--primary-text);
   box-shadow: 0 12px 24px color-mix(in srgb, var(--primary), transparent 75%);
+}
+
+.group-tab-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
 }
 
 .group-tab-name {
@@ -380,6 +415,38 @@ button:focus-visible {
   font-weight: 760;
   line-height: 1.5;
   text-align: center;
+}
+
+.quick-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.group-tab:hover .quick-actions,
+.group-tab:focus-within .quick-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.group-add-tab {
+  display: grid;
+  width: 100%;
+  place-items: center;
+  border-color: var(--border);
+  border-style: dashed;
+  background: transparent;
+  color: var(--primary);
+  font-size: 22px;
+  font-weight: 740;
+}
+
+.group-add-tab:hover {
+  border-color: color-mix(in srgb, var(--primary), var(--border) 25%);
+  background: var(--surface-muted);
 }
 
 .group-section {
@@ -418,19 +485,58 @@ button:focus-visible {
 
 .link-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.link-card-shell {
+  position: relative;
+  min-width: 0;
+  border-radius: 8px;
+}
+
+.link-card-shell[draggable='true'] {
+  cursor: grab;
+}
+
+.link-card-shell.is-dragging {
+  opacity: 0.56;
+}
+
+.link-card-shell.is-drag-over .link-card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 76%);
+}
+
+.card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.link-card-shell:hover .card-actions,
+.link-card-shell:focus-within .card-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .link-card {
+  position: relative;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
   grid-template-rows: auto auto;
-  column-gap: 13px;
+  height: 100%;
+  column-gap: 15px;
   row-gap: 3px;
   align-items: center;
-  min-height: 86px;
-  padding: 16px;
+  min-height: 108px;
+  padding: 18px 18px 24px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-muted);
@@ -452,8 +558,8 @@ button:focus-visible {
 
 .link-card img {
   grid-row: 1 / span 2;
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   border-radius: 8px;
   background: var(--surface);
 }
@@ -476,6 +582,36 @@ button:focus-visible {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.25;
+}
+
+.link-card .click-count {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  min-width: auto;
+  color: color-mix(in srgb, var(--muted), transparent 12%);
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1;
+  text-align: right;
+}
+
+.add-card {
+  display: grid;
+  min-height: 108px;
+  place-items: center;
+  border-color: var(--border);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-muted), transparent 18%);
+  color: var(--primary);
+  font-size: 30px;
+  font-weight: 680;
+}
+
+.add-card:hover {
+  border-color: color-mix(in srgb, var(--primary), var(--border) 25%);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
 }
 
 .link-editor {
@@ -511,6 +647,44 @@ button:focus-visible {
 .field-error {
   color: var(--danger);
   font-size: 12px;
+}
+
+.quick-edit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: color-mix(in srgb, #000000, transparent 55%);
+}
+
+.quick-edit-dialog {
+  width: min(430px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+.quick-edit-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.quick-edit-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 780;
+  line-height: 1.3;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 9px;
+  justify-content: flex-end;
 }
 
 .add-link-button {

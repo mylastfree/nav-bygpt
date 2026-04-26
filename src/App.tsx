@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type DragEvent,
+  type FormEvent,
+  type MouseEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   clearAdminToken,
   loadAdminToken,
@@ -7,15 +15,34 @@ import {
   saveDashboard,
 } from './api'
 import {
-  createEmptyGroup,
-  createEmptyLink,
+  createGroupFromName,
+  createLinkFromInput,
   faviconUrl,
+  incrementLinkClickCount,
   isSafeUrl,
   moveItem,
   normalizeUrl,
+  reorderLinkInGroup,
 } from './dashboard'
 import { isImportFileTooLarge, parseDashboardImport } from './importers'
 import type { DashboardData, LinkItem } from './types'
+
+type QuickEditDraft =
+  | {
+      kind: 'group'
+      mode: 'create' | 'edit'
+      groupId?: string
+      name: string
+    }
+  | {
+      kind: 'link'
+      mode: 'create' | 'edit'
+      groupId: string
+      linkId?: string
+      title: string
+      url: string
+      icon: string
+    }
 
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
@@ -27,6 +54,9 @@ function App() {
   const [status, setStatus] = useState('正在加载...')
   const [isSaving, setIsSaving] = useState(false)
   const [activeGroupId, setActiveGroupId] = useState('')
+  const [quickEdit, setQuickEdit] = useState<QuickEditDraft | null>(null)
+  const [draggingLinkId, setDraggingLinkId] = useState('')
+  const [dragOverLinkId, setDragOverLinkId] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -129,7 +159,7 @@ function App() {
     setStatus('有未保存修改')
   }
 
-  function unlockEditing(event: React.FormEvent<HTMLFormElement>) {
+  function unlockEditing(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const token = tokenDraft.trim()
 
@@ -196,14 +226,113 @@ function App() {
     }
   }
 
-  function addGroup() {
-    const group = createEmptyGroup()
+  function startQuickAddGroup() {
+    setQuickEdit({
+      kind: 'group',
+      mode: 'create',
+      name: '',
+    })
+  }
 
-    updateDashboard((current) => ({
-      ...current,
-      groups: [...current.groups, group],
-    }))
-    setActiveGroupId(group.id)
+  function startQuickEditGroup(groupId: string, name: string) {
+    setQuickEdit({
+      kind: 'group',
+      mode: 'edit',
+      groupId,
+      name,
+    })
+  }
+
+  function startQuickAddLink(groupId: string) {
+    setQuickEdit({
+      kind: 'link',
+      mode: 'create',
+      groupId,
+      title: '',
+      url: '',
+      icon: '',
+    })
+  }
+
+  function startQuickEditLink(groupId: string, link: LinkItem) {
+    setQuickEdit({
+      kind: 'link',
+      mode: 'edit',
+      groupId,
+      linkId: link.id,
+      title: link.title,
+      url: link.url,
+      icon: link.icon || '',
+    })
+  }
+
+  function updateQuickEditField(field: 'name' | 'title' | 'url' | 'icon', value: string) {
+    setQuickEdit((current) =>
+      current
+        ? ({
+            ...current,
+            [field]: value,
+          } as QuickEditDraft)
+        : current,
+    )
+  }
+
+  function saveQuickEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!quickEdit) {
+      return
+    }
+
+    if (quickEdit.kind === 'group') {
+      if (quickEdit.mode === 'create') {
+        const group = createGroupFromName(quickEdit.name)
+
+        updateDashboard((current) => ({
+          ...current,
+          groups: [...current.groups, group],
+        }))
+        setActiveGroupId(group.id)
+      } else if (quickEdit.groupId) {
+        updateGroupName(quickEdit.groupId, quickEdit.name.trim() || '新分组')
+      }
+
+      setQuickEdit(null)
+      return
+    }
+
+    if (!isSafeUrl(quickEdit.url)) {
+      setStatus('只支持 http 或 https 地址')
+      return
+    }
+
+    if (quickEdit.mode === 'create') {
+      const link = createLinkFromInput({
+        title: quickEdit.title,
+        url: quickEdit.url,
+        icon: quickEdit.icon,
+      })
+
+      updateDashboard((current) => ({
+        ...current,
+        groups: current.groups.map((group) =>
+          group.id === quickEdit.groupId
+            ? {
+                ...group,
+                links: [...group.links, link],
+              }
+            : group,
+        ),
+      }))
+    } else if (quickEdit.linkId) {
+      updateLink(quickEdit.groupId, quickEdit.linkId, {
+        title: quickEdit.title.trim() || '新网站',
+        url: normalizeUrl(quickEdit.url),
+        icon: quickEdit.icon.trim() || undefined,
+      })
+    }
+
+    setQuickEdit(null)
   }
 
   function updateGroupName(groupId: string, name: string) {
@@ -235,20 +364,6 @@ function App() {
     updateDashboard((current) => ({
       ...current,
       groups: moveItem(current.groups, groupIndex, direction),
-    }))
-  }
-
-  function addLink(groupId: string) {
-    updateDashboard((current) => ({
-      ...current,
-      groups: current.groups.map((group) =>
-        group.id === groupId
-          ? {
-              ...group,
-              links: [...group.links, createEmptyLink()],
-            }
-          : group,
-      ),
     }))
   }
 
@@ -287,18 +402,65 @@ function App() {
     }))
   }
 
-  function moveLink(groupId: string, linkIndex: number, direction: -1 | 1) {
-    updateDashboard((current) => ({
-      ...current,
-      groups: current.groups.map((group) =>
-        group.id === groupId
-          ? {
-              ...group,
-              links: moveItem(group.links, linkIndex, direction),
-            }
-          : group,
-      ),
-    }))
+  function handleLinkClick(
+    event: MouseEvent<HTMLAnchorElement>,
+    groupId: string,
+    linkId: string,
+  ) {
+    if (isEditing) {
+      event.preventDefault()
+      return
+    }
+
+    updateDashboard((current) => incrementLinkClickCount(current, groupId, linkId))
+  }
+
+  function handleLinkDragStart(event: DragEvent<HTMLElement>, linkId: string) {
+    if (!isEditing) {
+      return
+    }
+
+    setDraggingLinkId(linkId)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', linkId)
+  }
+
+  function handleLinkDragOver(event: DragEvent<HTMLElement>, linkId: string) {
+    if (!isEditing || draggingLinkId === linkId) {
+      return
+    }
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDragOverLinkId(linkId)
+  }
+
+  function handleLinkDrop(
+    event: DragEvent<HTMLElement>,
+    groupId: string,
+    targetLinkId: string,
+  ) {
+    if (!isEditing) {
+      return
+    }
+
+    event.preventDefault()
+    const sourceLinkId = draggingLinkId || event.dataTransfer.getData('text/plain')
+    setDraggingLinkId('')
+    setDragOverLinkId('')
+
+    if (!sourceLinkId || sourceLinkId === targetLinkId) {
+      return
+    }
+
+    updateDashboard((current) =>
+      reorderLinkInGroup(current, groupId, sourceLinkId, targetLinkId),
+    )
+  }
+
+  function resetLinkDrag() {
+    setDraggingLinkId('')
+    setDragOverLinkId('')
   }
 
   function updateSetting<K extends keyof DashboardData['settings']>(
@@ -468,9 +630,6 @@ function App() {
 
       {isEditing ? (
         <section className="editor-actions">
-          <button type="button" className="ghost-button" onClick={addGroup}>
-            新增分组
-          </button>
           <button type="button" className="ghost-button danger" onClick={forgetToken}>
             清除密码
           </button>
@@ -489,18 +648,56 @@ function App() {
           <div className="sidebar-label">分组</div>
           <div className="group-tabs">
             {dashboard.groups.map((group) => (
-              <button
-                type="button"
+              <div
                 className={`group-tab ${
                   group.id === activeGroup?.id ? 'is-active' : ''
                 }`}
-                onClick={() => setActiveGroupId(group.id)}
                 key={group.id}
               >
-                <span className="group-tab-name">{group.name}</span>
-                <span className="group-tab-count">{group.links.length}</span>
-              </button>
+                <button
+                  type="button"
+                  className="group-tab-main"
+                  onClick={() => setActiveGroupId(group.id)}
+                >
+                  <span className="group-tab-name">{group.name}</span>
+                  <span className="group-tab-count">{group.links.length}</span>
+                </button>
+
+                {isEditing ? (
+                  <span className="quick-actions">
+                    <button
+                      type="button"
+                      className="quick-icon-button"
+                      onClick={() => startQuickEditGroup(group.id, group.name)}
+                      aria-label="编辑分组"
+                      title="编辑分组"
+                    >
+                      ✎
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-icon-button danger"
+                      onClick={() => deleteGroup(group.id)}
+                      aria-label="删除分组"
+                      title="删除分组"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ) : null}
+              </div>
             ))}
+            {isEditing ? (
+              <button
+                type="button"
+                className="group-add-tab"
+                onClick={startQuickAddGroup}
+                aria-label="新增分组"
+                title="新增分组"
+              >
+                +
+              </button>
+            ) : null}
           </div>
         </aside>
 
@@ -508,26 +705,10 @@ function App() {
           <section className="group-section active-group-panel">
             <div className="group-header">
               <div className="group-title-area">
-                {isEditing ? (
-                  <label className="field-label compact-label">
-                    分组名称
-                    <input
-                      className="group-input"
-                      value={activeGroup.name}
-                      onChange={(event) =>
-                        updateGroupName(activeGroup.id, event.target.value)
-                      }
-                      aria-label="分组名称"
-                    />
-                  </label>
-                ) : (
-                  <>
-                    <h2>{activeGroup.name}</h2>
-                    <span className="group-meta">
-                      {activeGroup.links.length} 个网站
-                    </span>
-                  </>
-                )}
+                <h2>{activeGroup.name}</h2>
+                <span className="group-meta">
+                  {activeGroup.links.length} 个网站
+                </span>
               </div>
 
               {isEditing ? (
@@ -552,106 +733,52 @@ function App() {
                   >
                     ↓
                   </button>
-                  <button
-                    type="button"
-                    className="icon-button danger"
-                    onClick={() => deleteGroup(activeGroup.id)}
-                    aria-label="删除分组"
-                    title="删除分组"
-                  >
-                    ×
-                  </button>
                 </div>
               ) : null}
             </div>
 
             <div className="link-grid">
-              {visibleLinks.map((link, linkIndex) =>
-                isEditing ? (
-                  <article className="link-editor" key={link.id}>
-                    <div className="editor-line">
-                      <label className="field-label">
-                        网站名称
-                        <input
-                          value={link.title}
-                          onChange={(event) =>
-                            updateLink(activeGroup.id, link.id, {
-                              title: event.target.value,
-                            })
-                          }
-                          placeholder="例如：GitHub"
-                          aria-label="网站名称"
-                        />
-                      </label>
-                      <div className="row-actions">
-                        <button
-                          type="button"
-                          className="icon-button"
-                          onClick={() => moveLink(activeGroup.id, linkIndex, -1)}
-                          disabled={linkIndex === 0}
-                          aria-label="上移网站"
-                          title="上移网站"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          onClick={() => moveLink(activeGroup.id, linkIndex, 1)}
-                          disabled={linkIndex === activeGroup.links.length - 1}
-                          aria-label="下移网站"
-                          title="下移网站"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button danger"
-                          onClick={() => deleteLink(activeGroup.id, link.id)}
-                          aria-label="删除网站"
-                          title="删除网站"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </div>
-                    <label className="field-label">
-                      网站地址
-                      <input
-                        value={link.url}
-                        onChange={(event) =>
-                          updateLink(activeGroup.id, link.id, {
-                            url: event.target.value,
-                          })
-                        }
-                        placeholder="例如：https://github.com"
-                        aria-label="网站地址"
-                      />
-                    </label>
-                    <label className="field-label">
-                      图标地址
-                      <input
-                        value={link.icon || ''}
-                        onChange={(event) =>
-                          updateLink(activeGroup.id, link.id, {
-                            icon: event.target.value,
-                          })
-                        }
-                        placeholder="可留空，默认自动获取 favicon"
-                        aria-label="图标地址"
-                      />
-                    </label>
-                    {!isSafeUrl(link.url) ? (
-                      <span className="field-error">只支持 http 或 https 地址</span>
-                    ) : null}
-                  </article>
-                ) : (
+              {visibleLinks.map((link) => (
+                <article
+                  className={`link-card-shell ${
+                    draggingLinkId === link.id ? 'is-dragging' : ''
+                  } ${dragOverLinkId === link.id ? 'is-drag-over' : ''}`}
+                  draggable={isEditing}
+                  onDragStart={(event) => handleLinkDragStart(event, link.id)}
+                  onDragOver={(event) => handleLinkDragOver(event, link.id)}
+                  onDrop={(event) => handleLinkDrop(event, activeGroup.id, link.id)}
+                  onDragEnd={resetLinkDrag}
+                  key={link.id}
+                >
+                  {isEditing ? (
+                    <span className="card-actions">
+                      <button
+                        type="button"
+                        className="quick-icon-button"
+                        onClick={() => startQuickEditLink(activeGroup.id, link)}
+                        aria-label="编辑网站"
+                        title="编辑网站"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        className="quick-icon-button danger"
+                        onClick={() => deleteLink(activeGroup.id, link.id)}
+                        aria-label="删除网站"
+                        title="删除网站"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ) : null}
+
                   <a
                     className="link-card"
                     href={normalizeUrl(link.url)}
                     target="_blank"
                     rel="noreferrer noopener"
-                    key={link.id}
+                    onClick={(event) => handleLinkClick(event, activeGroup.id, link.id)}
                   >
                     <img
                       src={link.icon || faviconUrl(link.url)}
@@ -662,20 +789,23 @@ function App() {
                     />
                     <span>{link.title}</span>
                     <small>{normalizeUrl(link.url).replace(/^https?:\/\//, '')}</small>
+                    <span className="click-count">{link.clickCount ?? 0}</span>
                   </a>
-                ),
-              )}
-            </div>
+                </article>
+              ))}
 
-            {isEditing ? (
-              <button
-                type="button"
-                className="add-link-button"
-                onClick={() => addLink(activeGroup.id)}
-              >
-                新增网站
-              </button>
-            ) : null}
+              {isEditing ? (
+                <button
+                  type="button"
+                  className="add-card"
+                  onClick={() => startQuickAddLink(activeGroup.id)}
+                  aria-label="新增网站"
+                  title="新增网站"
+                >
+                  +
+                </button>
+              ) : null}
+            </div>
 
             {visibleLinks.length === 0 ? (
               <section className="empty-panel">
@@ -687,6 +817,91 @@ function App() {
           <section className="empty-panel">还没有分组，进入编辑模式后新增分组</section>
         )}
       </section>
+
+      {quickEdit ? (
+        <div className="quick-edit-backdrop">
+          <section
+            className="quick-edit-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-edit-title"
+          >
+            <form className="quick-edit-form" onSubmit={saveQuickEdit}>
+              <h3 className="quick-edit-title" id="quick-edit-title">
+                {quickEdit.kind === 'group'
+                  ? quickEdit.mode === 'create'
+                    ? '新增分组'
+                    : '编辑分组'
+                  : quickEdit.mode === 'create'
+                    ? '新增网站'
+                    : '编辑网站'}
+              </h3>
+
+              {quickEdit.kind === 'group' ? (
+                <label className="field-label">
+                  分组名称
+                  <input
+                    value={quickEdit.name}
+                    onChange={(event) => updateQuickEditField('name', event.target.value)}
+                    placeholder="例如：常用"
+                    aria-label="分组名称"
+                    autoFocus
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="field-label">
+                    网站名称
+                    <input
+                      value={quickEdit.title}
+                      onChange={(event) =>
+                        updateQuickEditField('title', event.target.value)
+                      }
+                      placeholder="例如：GitHub"
+                      aria-label="网站名称"
+                      autoFocus
+                    />
+                  </label>
+                  <label className="field-label">
+                    网站地址
+                    <input
+                      value={quickEdit.url}
+                      onChange={(event) => updateQuickEditField('url', event.target.value)}
+                      placeholder="例如：https://github.com"
+                      aria-label="网站地址"
+                    />
+                  </label>
+                  <label className="field-label">
+                    图标地址
+                    <input
+                      value={quickEdit.icon}
+                      onChange={(event) => updateQuickEditField('icon', event.target.value)}
+                      placeholder="可留空，默认自动获取 favicon"
+                      aria-label="图标地址"
+                    />
+                  </label>
+                  {quickEdit.url.trim() && !isSafeUrl(quickEdit.url) ? (
+                    <span className="field-error">只支持 http 或 https 地址</span>
+                  ) : null}
+                </>
+              )}
+
+              <div className="dialog-actions">
+                <button type="button" className="ghost-button" onClick={() => setQuickEdit(null)}>
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={quickEdit.kind === 'link' && !quickEdit.url.trim()}
+                >
+                  保存
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }
