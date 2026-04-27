@@ -7,13 +7,20 @@ const css = readFileSync(fileURLToPath(new URL('./index.css', import.meta.url)),
 
 describe('link health maintenance contract', () => {
   test('shows stored problem links in edit mode with safe maintenance actions', () => {
+    expect(appSource).toContain('checkLinks')
     expect(appSource).toContain('getStoredLinkCheckResults')
     expect(appSource).toContain('confirmLinkCheckResult')
+    expect(appSource).toContain('const [isCheckingLinks, setIsCheckingLinks]')
     expect(appSource).toContain('const problemLinkChecks = useMemo')
     expect(appSource).toContain("check.status !== 'ok'")
     expect(appSource).toContain('const problemLinkStatusById = useMemo')
+    expect(appSource).toContain('async function runLinkCheck()')
+    expect(appSource).toContain('applyLinkCheckResults')
+    expect(appSource).toContain('checkLinks(')
     expect(appSource).toContain('function findLinkForCheck(')
     expect(appSource).toContain('function confirmHealthyLink(')
+    expect(appSource).toContain('检测网址')
+    expect(appSource).toContain('isCheckingLinks')
     expect(appSource).toContain('className="notice-panel compact-notice link-check-panel"')
     expect(appSource).toContain('className="link-check-list"')
     expect(appSource).toContain('className={`link-check-card is-${item.status}`}')

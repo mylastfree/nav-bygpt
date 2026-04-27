@@ -14,6 +14,22 @@ export type LinkHealth = {
   confirmedAt?: string
 }
 
+export type LinkCheckRequestItem = {
+  id: string
+  url: string
+}
+
+export type LinkCheckResult = {
+  id: string
+  url: string
+  check: LinkHealth
+}
+
+export type LinkCheckResponse = {
+  checkedAt: string
+  results: LinkCheckResult[]
+}
+
 export type LinkGroup = {
   id: string
   name: string

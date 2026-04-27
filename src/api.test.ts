@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { LOCAL_DASHBOARD_KEY } from './dashboard'
-import { loadBackups, restoreBackup, saveDashboard } from './api'
-import type { BackupSummary, DashboardData } from './types'
+import { checkLinks, loadBackups, restoreBackup, saveDashboard } from './api'
+import type { BackupSummary, DashboardData, LinkCheckResult } from './types'
 
 function dashboardWith(url: string): DashboardData {
   return {
@@ -167,6 +167,48 @@ describe('cloud dashboard api', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({ id: 'backup:2026-04-27T00-00-00-000Z' }),
+    })
+  })
+
+  test('checks links through the protected Cloudflare endpoint', async () => {
+    const results: LinkCheckResult[] = [
+      {
+        id: 'github',
+        url: 'https://github.com',
+        check: {
+          status: 'ok',
+          reason: 'HTTP 200',
+          checkedAt: '2026-04-27T00:00:01.000Z',
+        },
+      },
+    ]
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          checkedAt: '2026-04-27T00:00:01.000Z',
+          results,
+        }),
+        { status: 200 },
+      )
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(
+      checkLinks([{ id: 'github', url: 'https://github.com' }], 'secret'),
+    ).resolves.toEqual({
+      checkedAt: '2026-04-27T00:00:01.000Z',
+      results,
+    })
+    expect(fetchSpy).toHaveBeenCalledWith('/api/link-check', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer secret',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        links: [{ id: 'github', url: 'https://github.com' }],
+      }),
     })
   })
 })

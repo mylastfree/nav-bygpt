@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react'
 import {
+  checkLinks,
   clearAdminToken,
   loadAdminToken,
   loadBackups,
@@ -36,6 +37,7 @@ import {
 } from './dashboard'
 import { isImportFileTooLarge, parseDashboardImport } from './importers'
 import {
+  applyLinkCheckResults,
   confirmLinkCheckResult,
   createImportPreview,
   getStoredLinkCheckResults,
@@ -48,6 +50,7 @@ import type {
   BackupSummary,
   DashboardData,
   GroupColor,
+  LinkCheckRequestItem,
   LinkItem,
   WallpaperIntensity,
   WallpaperPreset,
@@ -122,6 +125,8 @@ const linkCheckStatusLabels: Record<NonNullable<LinkItem['check']>['status'], st
   broken: '疑似失效',
 }
 
+const LINK_CHECK_BATCH_SIZE = 50
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [query, setQuery] = useState('')
@@ -142,6 +147,7 @@ function App() {
   const [showBackups, setShowBackups] = useState(false)
   const [isLoadingBackups, setIsLoadingBackups] = useState(false)
   const [isRestoringBackup, setIsRestoringBackup] = useState(false)
+  const [isCheckingLinks, setIsCheckingLinks] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -386,6 +392,95 @@ function App() {
       setStatus(error instanceof Error ? error.message : '恢复备份失败')
     } finally {
       setIsRestoringBackup(false)
+    }
+  }
+
+  async function runLinkCheck() {
+    if (!dashboard || isCheckingLinks) {
+      return
+    }
+
+    const links: LinkCheckRequestItem[] = dashboard.groups.flatMap((group) =>
+      group.links.map((link) => ({
+        id: link.id,
+        url: normalizeUrl(link.url),
+      })),
+    )
+
+    if (links.length === 0) {
+      setStatus('还没有可检测的网址')
+      return
+    }
+
+    const linkMetaById = new Map(
+      dashboard.groups.flatMap((group) =>
+        group.links.map((link): [
+          string,
+          {
+            groupId: string
+            groupName: string
+            title: string
+            url: string
+          },
+        ] => [
+          link.id,
+          {
+            groupId: group.id,
+            groupName: group.name,
+            title: link.title,
+            url: normalizeUrl(link.url),
+          },
+        ]),
+      ),
+    )
+
+    setIsCheckingLinks(true)
+    setStatus(`正在检测 ${links.length} 个网址...`)
+
+    try {
+      const results: Parameters<typeof applyLinkCheckResults>[1] = []
+      let checkedAt = new Date().toISOString()
+
+      for (let index = 0; index < links.length; index += LINK_CHECK_BATCH_SIZE) {
+        const response = await checkLinks(
+          links.slice(index, index + LINK_CHECK_BATCH_SIZE),
+          adminToken,
+        )
+        checkedAt = response.checkedAt || checkedAt
+
+        for (const result of response.results) {
+          const meta = linkMetaById.get(result.id)
+
+          if (!meta) {
+            continue
+          }
+
+          results.push({
+            linkId: result.id,
+            groupId: meta.groupId,
+            groupName: meta.groupName,
+            title: meta.title,
+            url: result.url || meta.url,
+            status: result.check.status,
+            reason: result.check.reason,
+            checkedAt: result.check.checkedAt || response.checkedAt,
+          })
+        }
+      }
+
+      updateDashboard((current) => applyLinkCheckResults(current, results, checkedAt))
+      setHighlightedLinkId('')
+
+      const problemCount = results.filter((result) => result.status !== 'ok').length
+      setStatus(
+        problemCount > 0
+          ? `已检测 ${results.length} 个网址，发现 ${problemCount} 条疑似问题，保存后写入 Cloudflare KV`
+          : `已检测 ${results.length} 个网址，暂未发现疑似问题，保存后写入 Cloudflare KV`,
+      )
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '检测网址失败')
+    } finally {
+      setIsCheckingLinks(false)
     }
   }
 
@@ -888,6 +983,14 @@ function App() {
                 disabled={isLoadingBackups || isRestoringBackup}
               >
                 {isLoadingBackups ? '读取中' : showBackups ? '关闭备份' : '备份'}
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void runLinkCheck()}
+                disabled={isCheckingLinks || totalLinks === 0}
+              >
+                {isCheckingLinks ? '检测中' : '检测网址'}
               </button>
               <button
                 type="button"

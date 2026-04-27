@@ -4,6 +4,10 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024
 const MAX_GROUPS = 500
 const MAX_TOTAL_LINKS = 5000
 const MAX_LINKS_PER_GROUP = 1000
+const MAX_LINK_CHECKS = 50
+const LINK_CHECK_TIMEOUT_MS = 6000
+const LINK_CHECK_CONCURRENCY = 6
+const LIMITED_HTTP_STATUS_CODES = [401, 403, 405, 429]
 
 const CARD_LAYOUT_OPTIONS = ['comfortable', 'compact', 'list']
 const GROUP_COLOR_OPTIONS = ['slate', 'blue', 'green', 'amber', 'rose', 'purple', 'teal']
@@ -70,6 +74,10 @@ export default {
 
     if (url.pathname === '/api/backups/restore' && request.method === 'POST') {
       return restoreBackup(request, env, context)
+    }
+
+    if (url.pathname === '/api/link-check' && request.method === 'POST') {
+      return checkLinks(request, env)
     }
 
     if (url.pathname.startsWith('/api/')) {
@@ -253,6 +261,74 @@ async function restoreBackup(request, env, context) {
   return json({
     mode: 'cloud',
     updatedAt,
+  })
+}
+
+async function checkLinks(request, env) {
+  const authError = requireAdmin(request, env)
+  if (authError) {
+    return authError
+  }
+
+  const contentLength = Number(request.headers.get('content-length') || '0')
+  if (contentLength > MAX_BODY_BYTES) {
+    return text('Link check request is too large.', 413)
+  }
+
+  const body = await request.text()
+  if (new TextEncoder().encode(body).length > MAX_BODY_BYTES) {
+    return text('Link check request is too large.', 413)
+  }
+
+  let parsed
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return text('Invalid JSON.', 400)
+  }
+
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.links)) {
+    return text('Links must be an array.', 400)
+  }
+
+  if (parsed.links.length > MAX_LINK_CHECKS) {
+    return text(`Too many links. Max is ${MAX_LINK_CHECKS}.`, 400)
+  }
+
+  const links = []
+  for (const item of parsed.links) {
+    if (!item || typeof item !== 'object') {
+      return text('Each link must be an object.', 400)
+    }
+
+    const id = cleanText(item.id, 80)
+    const url = cleanText(item.url, 2048)
+
+    if (!id) {
+      return text('Invalid link id.', 400)
+    }
+
+    if (!isSafeUrl(url)) {
+      return text(`Invalid URL: ${url || id}`, 400)
+    }
+
+    links.push({ id, url })
+  }
+
+  const checkedAt = new Date().toISOString()
+  const results = await mapWithConcurrency(
+    links,
+    LINK_CHECK_CONCURRENCY,
+    async (link) => ({
+      id: link.id,
+      url: link.url,
+      check: await fetchLinkHealth(link.url, checkedAt),
+    }),
+  )
+
+  return json({
+    checkedAt,
+    results,
   })
 }
 
@@ -514,6 +590,65 @@ async function trimBackups(kv) {
     .slice(0, Math.max(0, list.keys.length - 20))
 
   await Promise.all(stale.map((key) => kv.delete(key)))
+}
+
+async function fetchLinkHealth(url, checkedAt) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), LINK_CHECK_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal,
+    })
+
+    return {
+      status: linkHealthStatusFromHttp(response.status),
+      reason: `HTTP ${response.status}`,
+      checkedAt,
+    }
+  } catch (error) {
+    return {
+      status: 'limited',
+      reason: error && error.name === 'AbortError' ? 'Timeout' : 'Fetch failed',
+      checkedAt,
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function linkHealthStatusFromHttp(status) {
+  if (status >= 200 && status < 400) {
+    return 'ok'
+  }
+
+  if (LIMITED_HTTP_STATUS_CODES.includes(status)) {
+    return 'limited'
+  }
+
+  if (status >= 400) {
+    return 'broken'
+  }
+
+  return 'limited'
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length)
+  let nextIndex = 0
+  const workerCount = Math.min(limit, items.length)
+  const runners = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await mapper(items[index])
+    }
+  })
+
+  await Promise.all(runners)
+  return results
 }
 
 function json(data, status = 200) {

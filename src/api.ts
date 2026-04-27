@@ -5,7 +5,13 @@ import {
   sampleDashboard,
   sanitizeDashboard,
 } from './dashboard'
-import type { BackupSummary, DashboardData, SaveResult } from './types'
+import type {
+  BackupSummary,
+  DashboardData,
+  LinkCheckRequestItem,
+  LinkCheckResponse,
+  SaveResult,
+} from './types'
 
 export async function loadDashboard(): Promise<DashboardData> {
   const localData = loadLocalDashboard()
@@ -149,6 +155,41 @@ export async function restoreBackup(
 
   const message = await response.text()
   throw new Error(message || `恢复备份失败：HTTP ${response.status}`)
+}
+
+export async function checkLinks(
+  links: LinkCheckRequestItem[],
+  adminToken: string,
+): Promise<LinkCheckResponse> {
+  const token = adminToken.trim()
+
+  if (!token) {
+    throw new Error('请先输入管理员密码。')
+  }
+
+  try {
+    const response = await fetch('/api/link-check', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ links }),
+    })
+
+    if (response.ok) {
+      return (await response.json()) as LinkCheckResponse
+    }
+
+    const message = await response.text()
+    throw new Error(message || `检测网址失败：HTTP ${response.status}`)
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error('无法连接 Cloudflare 检测接口，请检查是否已经上传最新版本。')
+    }
+
+    throw error
+  }
 }
 
 export function loadLocalDashboard() {

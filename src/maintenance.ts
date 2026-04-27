@@ -13,6 +13,7 @@ export type LinkCheckResult = {
   url: string
   status: NonNullable<LinkItem['check']>['status']
   reason: string
+  checkedAt?: string
 }
 
 export type ImportPreview = {
@@ -172,7 +173,7 @@ export function applyLinkCheckResults(
           check: {
             status: result.status,
             reason: result.reason,
-            checkedAt,
+            checkedAt: result.checkedAt ?? checkedAt,
           },
         }
       }),
