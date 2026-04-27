@@ -340,6 +340,39 @@ h2 {
   background: color-mix(in srgb, var(--surface), var(--primary-soft) 28%);
 }
 
+.backup-recovery-callout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary), var(--border) 34%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary-soft), var(--surface) 46%);
+}
+
+.backup-recovery-callout strong,
+.backup-recovery-callout span {
+  display: block;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backup-recovery-callout strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.backup-recovery-callout span {
+  margin-top: 3px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .maintenance-heading {
   display: flex;
   flex-wrap: wrap;
@@ -1442,6 +1475,18 @@ button:focus-visible {
   line-height: 1.25;
 }
 
+.import-preview-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger), var(--border) 36%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger), var(--surface) 92%);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
 .import-preview-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1526,6 +1571,7 @@ button:focus-visible {
   .editor-line,
   .check-result,
   .link-check-card,
+  .backup-recovery-callout,
   .backup-card {
     grid-template-columns: 1fr;
   }

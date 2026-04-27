@@ -84,10 +84,15 @@ describe('maintenance helpers', () => {
   test('previews import impact before replacing or merging data', () => {
     const preview = createImportPreview(dashboard(), importedDashboard())
 
+    expect(preview.currentGroupCount).toBe(2)
+    expect(preview.currentLinkCount).toBe(3)
     expect(preview.importedGroupCount).toBe(1)
     expect(preview.importedLinkCount).toBe(2)
     expect(preview.duplicateUrlCount).toBe(1)
     expect(preview.mergeLinkCount).toBe(4)
+    expect(preview.replaceGroupCount).toBe(1)
+    expect(preview.replaceLinkCount).toBe(2)
+    expect(preview.removedLinkCount).toBe(1)
   })
 
   test('merges imported data by skipping duplicate URLs and preserving current settings', () => {

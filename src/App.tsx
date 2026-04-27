@@ -139,6 +139,41 @@ const linkCheckStatusLabels: Record<NonNullable<LinkItem['check']>['status'], st
 
 const LINK_CHECK_BATCH_SIZE = 50
 
+function getReplaceImportWarning(preview: ImportPreview) {
+  if (preview.replaceLinkCount === 0 && preview.currentLinkCount > 0) {
+    return `导入文件里没有网站，覆盖后会清空当前 ${preview.currentLinkCount} 个网站。`
+  }
+
+  if (preview.replaceGroupCount === 0 && preview.currentGroupCount > 0) {
+    return `导入文件里没有分组，覆盖后会清空当前 ${preview.currentGroupCount} 个分组。`
+  }
+
+  if (preview.removedLinkCount > 0) {
+    return `覆盖后网站数量会从 ${preview.currentLinkCount} 个变成 ${preview.replaceLinkCount} 个，减少 ${preview.removedLinkCount} 个。`
+  }
+
+  return ''
+}
+
+function getImportConfirmationMessage(
+  mode: 'merge' | 'replace',
+  preview: ImportPreview,
+) {
+  if (mode === 'merge' && preview.importedLinkCount === 0) {
+    return '导入文件里没有可用网站，继续合并不会新增内容。确定继续？'
+  }
+
+  if (mode === 'replace') {
+    const warning = getReplaceImportWarning(preview)
+
+    if (warning) {
+      return `${warning}\n\n建议先导出当前数据，并确认 KV 备份可用。确定覆盖当前数据吗？`
+    }
+  }
+
+  return ''
+}
+
 function formatStorageSize(bytes: number) {
   if (bytes < 1024) {
     return `${bytes} B`
@@ -347,9 +382,16 @@ function App() {
     return dashboard ? getDashboardHealth(dashboard, backups) : null
   }, [backups, dashboard])
 
+  const latestNonEmptyBackup = useMemo(() => {
+    return backups.find((backup) => backup.linkCount > 0) ?? null
+  }, [backups])
+
   const isGlobalSearch = !isEditing && searchScope === 'all' && query.trim().length > 0
   const canDragSortLinks = Boolean(isEditing && activeGroup && !isGlobalSearch)
   const selectedCount = selectedLinkIds.size
+  const pendingImportWarning = pendingImport
+    ? getReplaceImportWarning(pendingImport.preview)
+    : ''
 
   function updateDashboard(updater: (current: DashboardData) => DashboardData) {
     setDashboard((current) => {
@@ -507,6 +549,15 @@ function App() {
     } finally {
       setIsRestoringBackup(false)
     }
+  }
+
+  async function restoreLatestNonEmptyBackup() {
+    if (!latestNonEmptyBackup) {
+      await openBackupPanel()
+      return
+    }
+
+    await restoreBackupById(latestNonEmptyBackup.id)
   }
 
   async function runLinkCheck() {
@@ -1119,6 +1170,12 @@ function App() {
       return
     }
 
+    const confirmationMessage = getImportConfirmationMessage(mode, pendingImport.preview)
+
+    if (confirmationMessage && !confirm(confirmationMessage)) {
+      return
+    }
+
     if (mode === 'merge') {
       updateDashboardWithUndo('导入数据', (current) =>
         mergeImportedDashboard(current, pendingImport.dashboard),
@@ -1241,7 +1298,7 @@ function App() {
                 }}
                 disabled={isLoadingBackups || isRestoringBackup}
               >
-                {isLoadingBackups ? '读取中' : showBackups ? '关闭备份' : '备份'}
+                {isLoadingBackups ? '读取中' : showBackups ? '关闭备份' : '备份/恢复'}
               </button>
               <button
                 type="button"
@@ -1380,6 +1437,26 @@ function App() {
                   : '暂未读取'}
               </span>
             </div>
+            <div className="row-actions">
+              {latestNonEmptyBackup ? (
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => void restoreLatestNonEmptyBackup()}
+                  disabled={isRestoringBackup}
+                >
+                  恢复最近非空备份
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void openBackupPanel()}
+                disabled={isLoadingBackups || isRestoringBackup}
+              >
+                查看备份
+              </button>
+            </div>
           </div>
           <div className="health-grid">
             <span>分组 {dashboardHealth.groupCount}</span>
@@ -1490,6 +1567,26 @@ function App() {
               刷新
             </button>
           </div>
+          {latestNonEmptyBackup ? (
+            <div className="backup-recovery-callout">
+              <div>
+                <strong>最近非空备份</strong>
+                <span>
+                  {formatBackupDate(latestNonEmptyBackup.createdAt)} ·{' '}
+                  {latestNonEmptyBackup.groupCount} 个分组 ·{' '}
+                  {latestNonEmptyBackup.linkCount} 个网站
+                </span>
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void restoreLatestNonEmptyBackup()}
+                disabled={isRestoringBackup}
+              >
+                恢复最近非空备份
+              </button>
+            </div>
+          ) : null}
           {backups.length > 0 ? (
             <div className="backup-list">
               {backups.map((backup) => (
@@ -1954,6 +2051,10 @@ function App() {
               </p>
               <div className="import-preview-grid">
                 <span className="import-preview-stat">
+                  <strong>{pendingImport.preview.currentLinkCount}</strong>
+                  <small>当前网站</small>
+                </span>
+                <span className="import-preview-stat">
                   <strong>{pendingImport.preview.importedGroupCount}</strong>
                   <small>导入分组</small>
                 </span>
@@ -1970,10 +2071,21 @@ function App() {
                   <small>合并后网站</small>
                 </span>
                 <span className="import-preview-stat">
+                  <strong>{pendingImport.preview.replaceLinkCount}</strong>
+                  <small>覆盖后网站</small>
+                </span>
+                <span className="import-preview-stat">
+                  <strong>{pendingImport.preview.removedLinkCount}</strong>
+                  <small>覆盖将减少</small>
+                </span>
+                <span className="import-preview-stat">
                   <strong>{pendingImport.skippedCount}</strong>
                   <small>跳过地址</small>
                 </span>
               </div>
+              {pendingImportWarning ? (
+                <p className="import-preview-warning">{pendingImportWarning}</p>
+              ) : null}
               {pendingImport.skippedCount > 0 ? (
                 <p className="field-error">
                   已跳过内部地址或无效地址 {pendingImport.skippedCount} 条。

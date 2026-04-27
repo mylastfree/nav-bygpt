@@ -17,10 +17,15 @@ export type LinkCheckResult = {
 }
 
 export type ImportPreview = {
+  currentGroupCount: number
+  currentLinkCount: number
   importedGroupCount: number
   importedLinkCount: number
   duplicateUrlCount: number
   mergeLinkCount: number
+  replaceGroupCount: number
+  replaceLinkCount: number
+  removedLinkCount: number
 }
 
 export type DashboardHealth = {
@@ -56,6 +61,7 @@ export function createImportPreview(
   imported: DashboardData,
 ): ImportPreview {
   const currentUrls = collectUrls(current)
+  const currentLinkCount = countDashboardLinks(current)
   const importedLinks = imported.groups.flatMap((group) => group.links)
   let duplicateUrlCount = 0
   let mergeableLinkCount = 0
@@ -73,10 +79,15 @@ export function createImportPreview(
   })
 
   return {
+    currentGroupCount: current.groups.length,
+    currentLinkCount,
     importedGroupCount: imported.groups.length,
     importedLinkCount: importedLinks.length,
     duplicateUrlCount,
-    mergeLinkCount: countDashboardLinks(current) + mergeableLinkCount,
+    mergeLinkCount: currentLinkCount + mergeableLinkCount,
+    replaceGroupCount: imported.groups.length,
+    replaceLinkCount: importedLinks.length,
+    removedLinkCount: Math.max(0, currentLinkCount - importedLinks.length),
   }
 }
 

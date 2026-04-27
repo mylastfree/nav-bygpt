@@ -12,14 +12,18 @@ describe('backup restore app contract', () => {
     expect(appSource).toContain('BackupSummary')
     expect(appSource).toContain('const [backups, setBackups]')
     expect(appSource).toContain('const [showBackups, setShowBackups]')
+    expect(appSource).toContain('const latestNonEmptyBackup = useMemo')
     expect(appSource).toContain('async function openBackupPanel()')
     expect(appSource).toContain('async function restoreBackupById(id: string)')
+    expect(appSource).toContain('restoreLatestNonEmptyBackup')
     expect(appSource).toContain('backup-panel')
+    expect(appSource).toContain('backup-recovery-callout')
     expect(appSource).toContain('backups.map((backup)')
   })
 
   test('styles backup restore panel as a maintenance panel', () => {
     expect(css).toContain('.backup-panel')
+    expect(css).toContain('.backup-recovery-callout')
     expect(css).toContain('.backup-list')
     expect(css).toContain('.backup-card')
     expect(css).toContain('.backup-meta')
