@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
+  clearLinkIcons,
+  deleteLinks,
   findDuplicateLinkIds,
   findDuplicateLinks,
   sanitizeDashboard,
@@ -251,6 +253,24 @@ describe('dashboard organization helpers', () => {
       'github-b',
       'github-a',
     ])
+  })
+
+  test('deletes selected links across groups', () => {
+    const next = deleteLinks(dashboardWithDuplicates(), new Set(['github-a', 'github-b']))
+
+    expect(next.groups[0].links.map((link) => link.id)).toEqual(['openai'])
+    expect(next.groups[1].links).toEqual([])
+  })
+
+  test('clears selected custom icons without removing unselected icons', () => {
+    const data = dashboardWithDuplicates()
+    data.groups[0].links[0].icon = 'https://example.com/github.png'
+    data.groups[0].links[1].icon = 'https://example.com/openai.png'
+
+    const next = clearLinkIcons(data, new Set(['github-a']))
+
+    expect(next.groups[0].links[0].icon).toBeUndefined()
+    expect(next.groups[0].links[1].icon).toBe('https://example.com/openai.png')
   })
 
   test('reorders links inside the same group by dragged and target link ids', () => {

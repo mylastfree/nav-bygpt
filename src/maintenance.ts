@@ -3,7 +3,7 @@ import {
   findDuplicateLinks,
   sanitizeDashboard,
 } from './dashboard'
-import type { DashboardBackup, DashboardData, LinkItem } from './types'
+import type { BackupSummary, DashboardBackup, DashboardData, LinkItem } from './types'
 
 export type LinkCheckResult = {
   linkId: string
@@ -231,7 +231,7 @@ export function getStoredLinkCheckResults(dashboard: DashboardData): LinkCheckRe
 
 export function getDashboardHealth(
   dashboard: DashboardData,
-  backups: DashboardBackup[] = [],
+  backups: Array<DashboardBackup | BackupSummary> = [],
 ): DashboardHealth {
   const links = dashboard.groups.flatMap((group) => group.links)
   const duplicates = findDuplicateLinks(dashboard)
@@ -267,7 +267,10 @@ function countCheckedLinks(
   return links.filter((link) => link.check?.status === status).length
 }
 
-function estimateStorageBytes(dashboard: DashboardData, backups: DashboardBackup[]) {
+function estimateStorageBytes(
+  dashboard: DashboardData,
+  backups: Array<DashboardBackup | BackupSummary>,
+) {
   const text = JSON.stringify({
     dashboard,
     backups,

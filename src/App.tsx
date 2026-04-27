@@ -22,8 +22,10 @@ import {
   GROUP_COLOR_OPTIONS,
   WALLPAPER_INTENSITY_OPTIONS,
   WALLPAPER_PRESET_OPTIONS,
+  clearLinkIcons,
   createGroupFromName,
   createLinkFromInput,
+  deleteLinks,
   faviconUrl,
   type DuplicateLinkGroup,
   findDuplicateLinkIds,
@@ -31,6 +33,7 @@ import {
   incrementLinkClickCount,
   isSafeUrl,
   moveItem,
+  moveLinksToGroup,
   nextThemePreference,
   normalizeUrl,
   reorderLinkInGroup,
@@ -40,10 +43,12 @@ import {
   applyLinkCheckResults,
   confirmLinkCheckResult,
   createImportPreview,
+  getDashboardHealth,
   getStoredLinkCheckResults,
   mergeImportedDashboard,
   removeDuplicateLinksByUrl,
   type ImportPreview,
+  type LinkCheckResult,
 } from './maintenance'
 import type {
   CardLayout,
@@ -74,6 +79,7 @@ type QuickEditDraft =
     }
 
 type SearchScope = 'group' | 'all'
+type CheckFilter = 'issues' | 'broken' | 'limited' | 'ok' | 'all'
 
 type VisibleLink = {
   groupId: string
@@ -87,6 +93,11 @@ type PendingImportDraft = {
   dashboard: DashboardData
   preview: ImportPreview
   skippedCount: number
+}
+
+type UndoEntry = {
+  label: string
+  dashboard: DashboardData
 }
 
 const cardLayoutLabels: Record<CardLayout, string> = {
@@ -127,10 +138,20 @@ const linkCheckStatusLabels: Record<NonNullable<LinkItem['check']>['status'], st
 
 const LINK_CHECK_BATCH_SIZE = 50
 
+function formatStorageSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+
+  return `${(bytes / 1024).toFixed(1)} KB`
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [query, setQuery] = useState('')
   const [searchScope, setSearchScope] = useState<SearchScope>('group')
+  const [selectedLinkIds, setSelectedLinkIds] = useState<Set<string>>(() => new Set())
+  const [batchTargetGroupId, setBatchTargetGroupId] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [adminToken, setAdminToken] = useState(loadAdminToken)
   const [tokenDraft, setTokenDraft] = useState('')
@@ -142,12 +163,16 @@ function App() {
   const [draggingLinkId, setDraggingLinkId] = useState('')
   const [dragOverLinkId, setDragOverLinkId] = useState('')
   const [highlightedLinkId, setHighlightedLinkId] = useState('')
+  const [undoEntry, setUndoEntry] = useState<UndoEntry | null>(null)
   const [pendingImport, setPendingImport] = useState<PendingImportDraft | null>(null)
   const [backups, setBackups] = useState<BackupSummary[]>([])
   const [showBackups, setShowBackups] = useState(false)
   const [isLoadingBackups, setIsLoadingBackups] = useState(false)
   const [isRestoringBackup, setIsRestoringBackup] = useState(false)
   const [isCheckingLinks, setIsCheckingLinks] = useState(false)
+  const [checkFilter, setCheckFilter] = useState<CheckFilter>('issues')
+  const [linkCheckProgress, setLinkCheckProgress] = useState({ done: 0, total: 0 })
+  const [currentLinkCheckResults, setCurrentLinkCheckResults] = useState<LinkCheckResult[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -202,6 +227,19 @@ function App() {
       setActiveGroupId(dashboard.groups[0].id)
     }
   }, [activeGroupId, dashboard])
+
+  useEffect(() => {
+    if (!dashboard || dashboard.groups.length === 0) {
+      if (batchTargetGroupId) {
+        setBatchTargetGroupId('')
+      }
+      return
+    }
+
+    if (!dashboard.groups.some((group) => group.id === batchTargetGroupId)) {
+      setBatchTargetGroupId(dashboard.groups[0].id)
+    }
+  }, [batchTargetGroupId, dashboard])
 
   const activeGroup = useMemo(() => {
     if (!dashboard || dashboard.groups.length === 0) {
@@ -264,19 +302,51 @@ function App() {
     return findDuplicateLinkIds(duplicateLinks)
   }, [duplicateLinks])
 
-  const linkCheckResults = useMemo(() => {
+  const storedLinkCheckResults = useMemo(() => {
     return dashboard ? getStoredLinkCheckResults(dashboard) : []
   }, [dashboard])
 
+  const visibleLinkCheckResults =
+    currentLinkCheckResults.length > 0 ? currentLinkCheckResults : storedLinkCheckResults
+
+  const brokenLinkResults = useMemo(() => {
+    return visibleLinkCheckResults.filter((item) => item.status === 'broken')
+  }, [visibleLinkCheckResults])
+
+  const limitedLinkResults = useMemo(() => {
+    return visibleLinkCheckResults.filter((item) => item.status === 'limited')
+  }, [visibleLinkCheckResults])
+
+  const okLinkCount = useMemo(() => {
+    return visibleLinkCheckResults.filter((item) => item.status === 'ok').length
+  }, [visibleLinkCheckResults])
+
+  const filteredLinkCheckResults = useMemo(() => {
+    if (checkFilter === 'all') {
+      return visibleLinkCheckResults
+    }
+
+    if (checkFilter === 'issues') {
+      return visibleLinkCheckResults.filter((item) => item.status !== 'ok')
+    }
+
+    return visibleLinkCheckResults.filter((item) => item.status === checkFilter)
+  }, [checkFilter, visibleLinkCheckResults])
+
   const problemLinkChecks = useMemo(() => {
-    return linkCheckResults.filter((check) => check.status !== 'ok')
-  }, [linkCheckResults])
+    return visibleLinkCheckResults.filter((check) => check.status !== 'ok')
+  }, [visibleLinkCheckResults])
 
   const problemLinkStatusById = useMemo(() => {
     return new Map(problemLinkChecks.map((check) => [check.linkId, check.status]))
   }, [problemLinkChecks])
 
+  const dashboardHealth = useMemo(() => {
+    return dashboard ? getDashboardHealth(dashboard, backups) : null
+  }, [backups, dashboard])
+
   const isGlobalSearch = !isEditing && searchScope === 'all' && query.trim().length > 0
+  const selectedCount = selectedLinkIds.size
 
   function updateDashboard(updater: (current: DashboardData) => DashboardData) {
     setDashboard((current) => {
@@ -287,6 +357,39 @@ function App() {
       return updater(current)
     })
     setStatus('有未保存修改')
+  }
+
+  function rememberUndo(label: string, previousDashboard: DashboardData) {
+    setUndoEntry({
+      label,
+      dashboard: previousDashboard,
+    })
+  }
+
+  function updateDashboardWithUndo(
+    label: string,
+    updater: (current: DashboardData) => DashboardData,
+  ) {
+    if (!dashboard) {
+      return
+    }
+
+    rememberUndo(label, dashboard)
+    setDashboard(updater(dashboard))
+    setStatus('有未保存修改')
+  }
+
+  function undoLastChange() {
+    if (!undoEntry) {
+      return
+    }
+
+    setDashboard(undoEntry.dashboard)
+    setActiveGroupId(undoEntry.dashboard.groups[0]?.id ?? '')
+    setSelectedLinkIds(new Set())
+    setCurrentLinkCheckResults([])
+    setUndoEntry(null)
+    setStatus(`已撤销：${undoEntry.label}，保存后写入 Cloudflare KV`)
   }
 
   function unlockEditing(event: FormEvent<HTMLFormElement>) {
@@ -373,10 +476,15 @@ function App() {
   }
 
   async function restoreBackupById(id: string) {
+    if (!dashboard) {
+      return
+    }
+
     if (!confirm('恢复这个备份？恢复前会先自动备份当前 KV 数据。')) {
       return
     }
 
+    const previousDashboard = dashboard
     setIsRestoringBackup(true)
     setStatus('正在恢复备份...')
 
@@ -384,8 +492,11 @@ function App() {
       const result = await restoreBackup(id, adminToken)
       const data = await loadDashboard()
 
+      rememberUndo('恢复备份', previousDashboard)
       setDashboard(data)
       setActiveGroupId(data.groups[0]?.id ?? '')
+      setSelectedLinkIds(new Set())
+      setCurrentLinkCheckResults([])
       setShowBackups(false)
       setStatus(`已恢复备份，更新时间 ${formatBackupDate(result.updatedAt)}`)
     } catch (error) {
@@ -435,15 +546,19 @@ function App() {
     )
 
     setIsCheckingLinks(true)
+    setCheckFilter('issues')
+    setCurrentLinkCheckResults([])
+    setLinkCheckProgress({ done: 0, total: links.length })
     setStatus(`正在检测 ${links.length} 个网址...`)
 
     try {
-      const results: Parameters<typeof applyLinkCheckResults>[1] = []
+      const results: LinkCheckResult[] = []
       let checkedAt = new Date().toISOString()
 
       for (let index = 0; index < links.length; index += LINK_CHECK_BATCH_SIZE) {
+        const batch = links.slice(index, index + LINK_CHECK_BATCH_SIZE)
         const response = await checkLinks(
-          links.slice(index, index + LINK_CHECK_BATCH_SIZE),
+          batch,
           adminToken,
         )
         checkedAt = response.checkedAt || checkedAt
@@ -466,9 +581,17 @@ function App() {
             checkedAt: result.check.checkedAt || response.checkedAt,
           })
         }
+
+        setCurrentLinkCheckResults([...results])
+        setLinkCheckProgress({
+          done: Math.min(index + batch.length, links.length),
+          total: links.length,
+        })
       }
 
+      rememberUndo('检测网址', dashboard)
       updateDashboard((current) => applyLinkCheckResults(current, results, checkedAt))
+      setCurrentLinkCheckResults(results)
       setHighlightedLinkId('')
 
       const problemCount = results.filter((result) => result.status !== 'ok').length
@@ -546,7 +669,7 @@ function App() {
       if (quickEdit.mode === 'create') {
         const group = createGroupFromName(quickEdit.name)
 
-        updateDashboard((current) => ({
+        updateDashboardWithUndo('新增分组', (current) => ({
           ...current,
           groups: [...current.groups, group],
         }))
@@ -571,7 +694,7 @@ function App() {
         icon: quickEdit.icon,
       })
 
-      updateDashboard((current) => ({
+      updateDashboardWithUndo('新增网址', (current) => ({
         ...current,
         groups: current.groups.map((group) =>
           group.id === quickEdit.groupId
@@ -594,7 +717,7 @@ function App() {
   }
 
   function updateGroupName(groupId: string, name: string) {
-    updateDashboard((current) => ({
+    updateDashboardWithUndo('编辑分组', (current) => ({
       ...current,
       groups: current.groups.map((group) =>
         group.id === groupId
@@ -612,21 +735,25 @@ function App() {
       return
     }
 
-    updateDashboard((current) => ({
+    updateDashboardWithUndo('删除分组', (current) => ({
       ...current,
       groups: current.groups.filter((group) => group.id !== groupId),
     }))
+    setSelectedLinkIds(new Set())
+    setCurrentLinkCheckResults((current) =>
+      current.filter((item) => item.groupId !== groupId),
+    )
   }
 
   function moveGroup(groupIndex: number, direction: -1 | 1) {
-    updateDashboard((current) => ({
+    updateDashboardWithUndo('调整分组排序', (current) => ({
       ...current,
       groups: moveItem(current.groups, groupIndex, direction),
     }))
   }
 
   function updateLink(groupId: string, linkId: string, patch: Partial<LinkItem>) {
-    updateDashboard((current) => ({
+    updateDashboardWithUndo('编辑网址', (current) => ({
       ...current,
       groups: current.groups.map((group) =>
         group.id === groupId
@@ -647,7 +774,7 @@ function App() {
   }
 
   function deleteLink(groupId: string, linkId: string) {
-    updateDashboard((current) => ({
+    updateDashboardWithUndo('删除网址', (current) => ({
       ...current,
       groups: current.groups.map((group) =>
         group.id === groupId
@@ -658,6 +785,14 @@ function App() {
           : group,
         ),
     }))
+    setSelectedLinkIds((current) => {
+      const next = new Set(current)
+      next.delete(linkId)
+      return next
+    })
+    setCurrentLinkCheckResults((current) =>
+      current.filter((item) => item.linkId !== linkId),
+    )
   }
 
   function findLinkForCheck(groupId: string, linkId: string) {
@@ -680,8 +815,19 @@ function App() {
   }
 
   function confirmHealthyLink(linkId: string) {
-    updateDashboard((current) =>
+    updateDashboardWithUndo('确认链接正常', (current) =>
       confirmLinkCheckResult(current, linkId, new Date().toISOString()),
+    )
+    setCurrentLinkCheckResults((current) =>
+      current.map((item) =>
+        item.linkId === linkId
+          ? {
+              ...item,
+              status: 'ok',
+              reason: '手动确认正常',
+            }
+          : item,
+      ),
     )
     setHighlightedLinkId('')
     setStatus('已确认链接没问题，保存后写入 Cloudflare KV')
@@ -692,9 +838,68 @@ function App() {
       return
     }
 
-    updateDashboard((current) => removeDuplicateLinksByUrl(current, duplicate.url))
+    updateDashboardWithUndo('整理重复网址', (current) =>
+      removeDuplicateLinksByUrl(current, duplicate.url),
+    )
     setHighlightedLinkId('')
     setStatus('已整理重复网址，保存后写入 Cloudflare KV')
+  }
+
+  function toggleLinkSelection(linkId: string) {
+    setSelectedLinkIds((current) => {
+      const next = new Set(current)
+
+      if (next.has(linkId)) {
+        next.delete(linkId)
+      } else {
+        next.add(linkId)
+      }
+
+      return next
+    })
+  }
+
+  function moveSelectedLinks() {
+    const targetGroupId = batchTargetGroupId || activeGroupId
+
+    if (!targetGroupId || selectedLinkIds.size === 0) {
+      return
+    }
+
+    updateDashboardWithUndo('移动选中网址', (current) =>
+      moveLinksToGroup(current, selectedLinkIds, targetGroupId),
+    )
+    setActiveGroupId(targetGroupId)
+    setSelectedLinkIds(new Set())
+  }
+
+  function deleteSelectedLinks() {
+    if (selectedLinkIds.size === 0) {
+      return
+    }
+
+    if (!confirm(`删除选中的 ${selectedLinkIds.size} 个网站？`)) {
+      return
+    }
+
+    updateDashboardWithUndo('删除选中网址', (current) =>
+      deleteLinks(current, selectedLinkIds),
+    )
+    setCurrentLinkCheckResults((current) =>
+      current.filter((item) => !selectedLinkIds.has(item.linkId)),
+    )
+    setSelectedLinkIds(new Set())
+  }
+
+  function clearSelectedIcons() {
+    if (selectedLinkIds.size === 0) {
+      return
+    }
+
+    updateDashboardWithUndo('清空选中图标', (current) =>
+      clearLinkIcons(current, selectedLinkIds),
+    )
+    setSelectedLinkIds(new Set())
   }
 
   function handleLinkClick(
@@ -748,7 +953,7 @@ function App() {
       return
     }
 
-    updateDashboard((current) =>
+    updateDashboardWithUndo('调整网址排序', (current) =>
       reorderLinkInGroup(current, groupId, sourceLinkId, targetLinkId),
     )
   }
@@ -861,19 +1066,23 @@ function App() {
   }
 
   function applyPendingImport(mode: 'merge' | 'replace') {
-    if (!pendingImport) {
+    if (!pendingImport || !dashboard) {
       return
     }
 
     if (mode === 'merge') {
-      updateDashboard((current) => mergeImportedDashboard(current, pendingImport.dashboard))
+      updateDashboardWithUndo('导入数据', (current) =>
+        mergeImportedDashboard(current, pendingImport.dashboard),
+      )
       setStatus('已合并导入，重复网址已跳过，保存后写入 Cloudflare KV')
     } else {
-      updateDashboard(() => pendingImport.dashboard)
+      updateDashboardWithUndo('导入数据', () => pendingImport.dashboard)
       setActiveGroupId(pendingImport.dashboard.groups[0]?.id ?? '')
       setStatus('已覆盖当前数据，保存后写入 Cloudflare KV')
     }
 
+    setSelectedLinkIds(new Set())
+    setCurrentLinkCheckResults([])
     setPendingImport(null)
   }
 
@@ -1035,11 +1244,70 @@ function App() {
         </form>
       ) : null}
 
+      {undoEntry ? (
+        <section className="notice-panel compact-notice undo-panel">
+          <div>
+            <strong>可以撤销最近一次操作</strong>
+            <span>{undoEntry.label}</span>
+          </div>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={undoLastChange}
+              disabled={isSaving}
+            >
+              撤销
+            </button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setUndoEntry(null)}
+            >
+              忽略
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       {isEditing ? (
         <section className="editor-actions">
           <button type="button" className="ghost-button danger" onClick={forgetToken}>
             清除密码
           </button>
+          {selectedCount > 0 ? (
+            <div className="batch-actions">
+              <span className="batch-status">已选 {selectedCount} 个网站</span>
+              <select
+                className="select-input compact-select"
+                value={batchTargetGroupId}
+                onChange={(event) => setBatchTargetGroupId(event.target.value)}
+                aria-label="移动到分组"
+              >
+                {dashboard.groups.map((group) => (
+                  <option value={group.id} key={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="ghost-button" onClick={moveSelectedLinks}>
+                移动
+              </button>
+              <button type="button" className="ghost-button" onClick={clearSelectedIcons}>
+                清图标
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setSelectedLinkIds(new Set())}
+              >
+                取消选择
+              </button>
+              <button type="button" className="ghost-button danger" onClick={deleteSelectedLinks}>
+                删除
+              </button>
+            </div>
+          ) : null}
           <input
             ref={fileInputRef}
             type="file"
@@ -1047,6 +1315,32 @@ function App() {
             hidden
             onChange={(event) => importJson(event.target.files?.[0])}
           />
+        </section>
+      ) : null}
+
+      {isEditing && dashboardHealth ? (
+        <section className="notice-panel health-panel">
+          <div className="maintenance-heading">
+            <div>
+              <strong>数据健康</strong>
+              <span>
+                最近备份：
+                {dashboardHealth.lastBackupAt
+                  ? formatBackupDate(dashboardHealth.lastBackupAt)
+                  : '暂未读取'}
+              </span>
+            </div>
+          </div>
+          <div className="health-grid">
+            <span>分组 {dashboardHealth.groupCount}</span>
+            <span>网站 {dashboardHealth.linkCount}</span>
+            <span>重复组 {dashboardHealth.duplicateGroupCount}</span>
+            <span>多余重复 {dashboardHealth.duplicateLinkCount}</span>
+            <span>疑似失效 {dashboardHealth.brokenCount}</span>
+            <span>受限 {dashboardHealth.limitedCount}</span>
+            <span>正常 {dashboardHealth.okCount}</span>
+            <span>本地约 {formatStorageSize(dashboardHealth.storageBytes)}</span>
+          </div>
         </section>
       ) : null}
 
@@ -1345,83 +1639,132 @@ function App() {
               </section>
             ) : null}
 
-            {isEditing && problemLinkChecks.length > 0 ? (
-              <section className="notice-panel compact-notice link-check-panel">
+            {isEditing ? (
+              <section className="notice-panel maintenance-panel">
                 <div className="maintenance-heading">
                   <div>
-                    <strong>发现 {problemLinkChecks.length} 条疑似问题链接</strong>
-                    <span>检测结果可能误判，请先定位或打开确认；确认没问题后会从问题清单移出。</span>
+                    <strong>网址维护</strong>
+                    <span>
+                      {visibleLinkCheckResults.length > 0
+                        ? `最近检测：正常 ${okLinkCount} 个，疑似失效 ${brokenLinkResults.length} 个，受限或异常 ${limitedLinkResults.length} 个`
+                        : '批量检测当前全部网站，集中查看疑似失效链接。'}
+                    </span>
+                  </div>
+                  <div className="row-actions">
+                    <label className="field-label inline-field">
+                      检测结果筛选
+                      <select
+                        className="select-input compact-select"
+                        value={checkFilter}
+                        onChange={(event) => setCheckFilter(event.target.value as CheckFilter)}
+                        aria-label="检测结果筛选"
+                      >
+                        <option value="issues">只看问题</option>
+                        <option value="broken">疑似失效</option>
+                        <option value="limited">受限</option>
+                        <option value="ok">正常</option>
+                        <option value="all">全部</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => void runLinkCheck()}
+                      disabled={isCheckingLinks || totalLinks === 0}
+                    >
+                      {isCheckingLinks ? '检测中' : '批量检测网站'}
+                    </button>
                   </div>
                 </div>
-                <div className="link-check-list">
-                  {problemLinkChecks.map((item) => (
-                    <article
-                      className={`link-check-card is-${item.status}`}
-                      key={`${item.groupId}-${item.linkId}`}
-                    >
-                      <div className="link-check-main">
-                        <span className="link-check-status">
-                          {linkCheckStatusLabels[item.status]}
-                        </span>
-                        <strong>
-                          {item.groupName} / {item.title}
-                        </strong>
-                        <span>{normalizeUrl(item.url)}</span>
-                        <small>{item.reason}</small>
-                      </div>
-                      <div className="row-actions link-check-actions">
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => locateLink(item.groupId, item.linkId)}
-                        >
-                          定位
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => {
-                            const link = findLinkForCheck(item.groupId, item.linkId)
 
-                            locateLink(item.groupId, item.linkId)
-                            if (link) {
-                              startQuickEditLink(item.groupId, link)
-                            }
-                          }}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button danger"
-                          onClick={() => deleteLink(item.groupId, item.linkId)}
-                        >
-                          删除
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() =>
-                            window.open(
-                              normalizeUrl(item.url),
-                              '_blank',
-                              'noopener,noreferrer',
-                            )
-                          }
-                        >
-                          打开
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => confirmHealthyLink(item.linkId)}
-                        >
-                          确认没问题
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
+                {isCheckingLinks ? (
+                  <span className="check-progress">
+                    正在检测 {linkCheckProgress.done} / {linkCheckProgress.total}
+                  </span>
+                ) : null}
+
+                {visibleLinkCheckResults.length > 0 ? (
+                  <div className="check-results">
+                    <section className="check-result-section">
+                      <h3>检测结果</h3>
+                      {filteredLinkCheckResults.length > 0 ? (
+                        <div className="check-result-list">
+                          {filteredLinkCheckResults.map((item) => (
+                            <article
+                              className={`check-result is-${item.status}`}
+                              key={`${item.groupId}-${item.linkId}`}
+                            >
+                              <div className="check-result-main">
+                                <span className="link-check-status">
+                                  {linkCheckStatusLabels[item.status]}
+                                </span>
+                                <strong>
+                                  {item.groupName} / {item.title}
+                                </strong>
+                                <span>{normalizeUrl(item.url)}</span>
+                              </div>
+                              <span className="check-reason">{item.reason}</span>
+                              <div className="row-actions check-actions">
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  onClick={() => locateLink(item.groupId, item.linkId)}
+                                >
+                                  定位
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  onClick={() => {
+                                    const link = findLinkForCheck(item.groupId, item.linkId)
+
+                                    locateLink(item.groupId, item.linkId)
+                                    if (link) {
+                                      startQuickEditLink(item.groupId, link)
+                                    }
+                                  }}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button danger"
+                                  onClick={() => deleteLink(item.groupId, item.linkId)}
+                                >
+                                  删除
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  onClick={() =>
+                                    window.open(
+                                      normalizeUrl(item.url),
+                                      '_blank',
+                                      'noopener,noreferrer',
+                                    )
+                                  }
+                                >
+                                  打开
+                                </button>
+                                {item.status !== 'ok' ? (
+                                  <button
+                                    type="button"
+                                    className="ghost-button"
+                                    onClick={() => confirmHealthyLink(item.linkId)}
+                                  >
+                                    确认没问题
+                                  </button>
+                                ) : null}
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="check-empty">当前筛选没有需要处理的链接。</span>
+                      )}
+                    </section>
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
@@ -1445,6 +1788,17 @@ function App() {
                   onDragEnd={resetLinkDrag}
                   key={link.id}
                 >
+                  {isEditing ? (
+                    <label className="select-link-card">
+                      <input
+                        type="checkbox"
+                        checked={selectedLinkIds.has(link.id)}
+                        onChange={() => toggleLinkSelection(link.id)}
+                        aria-label={`选择 ${link.title}`}
+                      />
+                    </label>
+                  ) : null}
+
                   {isEditing ? (
                     <span className="card-actions">
                       <button

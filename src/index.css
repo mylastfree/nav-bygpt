@@ -296,8 +296,31 @@ h2 {
   box-shadow: var(--shadow-soft);
 }
 
+.batch-actions {
+  display: flex;
+  flex: 1 1 420px;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.batch-status {
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.maintenance-panel {
+  background: color-mix(in srgb, var(--surface), var(--primary-soft) 46%);
+}
+
 .appearance-panel {
   background: color-mix(in srgb, var(--surface), var(--primary-soft) 38%);
+}
+
+.health-panel,
+.undo-panel {
+  background: color-mix(in srgb, var(--surface), var(--primary-soft) 42%);
 }
 
 .compact-notice {
@@ -343,11 +366,32 @@ h2 {
   line-height: 1.4;
 }
 
+.inline-field {
+  display: inline-grid;
+  gap: 5px;
+  min-width: 150px;
+}
+
+.health-grid,
 .appearance-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 10px;
   align-items: end;
+}
+
+.health-grid {
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+}
+
+.health-grid span {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .color-swatch-row {
@@ -376,9 +420,18 @@ h2 {
 }
 
 .duplicate-list,
+.check-results,
+.check-result-section,
+.check-result-list,
 .duplicate-card {
   display: grid;
   gap: 9px;
+}
+
+.check-result-section h3 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.3;
 }
 
 .duplicate-card {
@@ -386,6 +439,74 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
+}
+
+.check-progress,
+.check-empty {
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.check-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.check-result.is-broken {
+  border-color: color-mix(in srgb, var(--danger), var(--border) 32%);
+  background: color-mix(in srgb, var(--danger), var(--surface) 92%);
+}
+
+.check-result.is-limited {
+  border-color: color-mix(in srgb, var(--accent), var(--border) 32%);
+  background: color-mix(in srgb, var(--accent), var(--surface) 92%);
+}
+
+.check-result-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.check-result-main strong,
+.check-result-main span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-result-main strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.check-result-main span {
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.check-reason {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .duplicate-url,
@@ -433,7 +554,8 @@ h2 {
 }
 
 .duplicate-actions .ghost-button,
-.duplicate-card > .row-actions .ghost-button {
+.duplicate-card > .row-actions .ghost-button,
+.check-actions .ghost-button {
   min-height: 32px;
   padding: 6px 9px;
   font-size: 12px;
@@ -960,8 +1082,35 @@ button:focus-visible {
   transition: opacity 0.15s ease;
 }
 
+.select-link-card {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface), transparent 8%);
+  box-shadow: var(--shadow-soft);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.select-link-card input {
+  width: 15px;
+  min-height: 15px;
+  padding: 0;
+}
+
 .link-card-shell:hover .card-actions,
-.link-card-shell:focus-within .card-actions {
+.link-card-shell:focus-within .card-actions,
+.link-card-shell:hover .select-link-card,
+.link-card-shell:focus-within .select-link-card {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1370,6 +1519,7 @@ button:focus-visible {
 
   .group-header,
   .editor-line,
+  .check-result,
   .link-check-card,
   .backup-card {
     grid-template-columns: 1fr;
