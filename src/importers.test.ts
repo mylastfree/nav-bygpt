@@ -11,7 +11,9 @@ import {
 } from './dashboard'
 import {
   MAX_IMPORT_FILE_BYTES,
+  MAX_IMPORT_GROUPS,
   MAX_IMPORT_LINKS,
+  MAX_IMPORT_LINKS_PER_GROUP,
   isImportFileTooLarge,
   parseDashboardImport,
 } from './importers'
@@ -81,6 +83,48 @@ describe('import parsing', () => {
 
     expect(() => parseDashboardImport('large.json', JSON.stringify(dashboard))).toThrow(
       'import contains too many links',
+    )
+  })
+
+  test('rejects imports with too many groups before sending them to KV', () => {
+    const dashboard = sanitizeDashboard({
+      ...dashboardWithDuplicates(),
+      groups: Array.from({ length: MAX_IMPORT_GROUPS + 1 }, (_, index) => ({
+        id: `group-${index}`,
+        name: `Group ${index}`,
+        links: [
+          {
+            id: `link-${index}`,
+            title: `Link ${index}`,
+            url: `https://example.com/${index}`,
+          },
+        ],
+      })),
+    })
+
+    expect(() => parseDashboardImport('many-groups.json', JSON.stringify(dashboard))).toThrow(
+      'import contains too many groups',
+    )
+  })
+
+  test('rejects imports with too many links in one group before previewing them', () => {
+    const dashboard = sanitizeDashboard({
+      ...dashboardWithDuplicates(),
+      groups: [
+        {
+          id: 'large',
+          name: 'Large',
+          links: Array.from({ length: MAX_IMPORT_LINKS_PER_GROUP + 1 }, (_, index) => ({
+            id: `link-${index}`,
+            title: `Link ${index}`,
+            url: `https://example.com/${index}`,
+          })),
+        },
+      ],
+    })
+
+    expect(() => parseDashboardImport('large-group.json', JSON.stringify(dashboard))).toThrow(
+      'import contains too many links in one group',
     )
   })
 

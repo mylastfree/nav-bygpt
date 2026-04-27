@@ -19,7 +19,9 @@ export type ParsedDashboardImport = {
 }
 
 export const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024
+export const MAX_IMPORT_GROUPS = 500
 export const MAX_IMPORT_LINKS = 5000
+export const MAX_IMPORT_LINKS_PER_GROUP = 1000
 
 type ItabGroup = {
   id?: string
@@ -89,17 +91,45 @@ function createLink(item: ItabItem): LinkItem | null {
   }
 }
 
-function countLinks(groups: LinkGroup[]) {
-  return groups.reduce((count, group) => count + group.links.length, 0)
-}
-
 export function isImportFileTooLarge(file: Pick<File, 'size'>) {
   return file.size > MAX_IMPORT_FILE_BYTES
 }
 
-function assertImportLinkLimit(linkCount: number) {
-  if (linkCount > MAX_IMPORT_LINKS) {
-    throw new Error('import contains too many links')
+function assertImportSizeLimits(groups: LinkGroup[]) {
+  if (groups.length > MAX_IMPORT_GROUPS) {
+    throw new Error('import contains too many groups')
+  }
+
+  let linkCount = 0
+
+  groups.forEach((group) => {
+    if (group.links.length > MAX_IMPORT_LINKS_PER_GROUP) {
+      throw new Error('import contains too many links in one group')
+    }
+
+    linkCount += group.links.length
+
+    if (linkCount > MAX_IMPORT_LINKS) {
+      throw new Error('import contains too many links')
+    }
+  })
+
+  return linkCount
+}
+
+function createImportResult(
+  source: ImportSource,
+  dashboard: DashboardData,
+  skipped: ImportSkippedItem[],
+): ParsedDashboardImport {
+  const linkCount = assertImportSizeLimits(dashboard.groups)
+
+  return {
+    source,
+    dashboard,
+    groupCount: dashboard.groups.length,
+    linkCount,
+    skipped,
   }
 }
 
@@ -181,16 +211,7 @@ function convertItabBackup(input: { navConfig: ItabGroup[] }): ParsedDashboardIm
     groups,
   })
 
-  const linkCount = countLinks(dashboard.groups)
-  assertImportLinkLimit(linkCount)
-
-  return {
-    source: 'itab',
-    dashboard,
-    groupCount: dashboard.groups.length,
-    linkCount,
-    skipped,
-  }
+  return createImportResult('itab', dashboard, skipped)
 }
 
 export function parseDashboardImport(
@@ -201,16 +222,7 @@ export function parseDashboardImport(
 
   if (isDashboardData(parsed)) {
     const dashboard = sanitizeDashboard(parsed)
-    const linkCount = countLinks(dashboard.groups)
-    assertImportLinkLimit(linkCount)
-
-    return {
-      source: 'dashboard',
-      dashboard,
-      groupCount: dashboard.groups.length,
-      linkCount,
-      skipped: [],
-    }
+    return createImportResult('dashboard', dashboard, [])
   }
 
   if (isItabBackup(parsed)) {
