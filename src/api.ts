@@ -5,7 +5,7 @@ import {
   sampleDashboard,
   sanitizeDashboard,
 } from './dashboard'
-import type { DashboardData, SaveResult } from './types'
+import type { BackupSummary, DashboardData, SaveResult } from './types'
 
 export async function loadDashboard(): Promise<DashboardData> {
   const localData = loadLocalDashboard()
@@ -87,6 +87,68 @@ export async function saveDashboard(
 
     throw error
   }
+}
+
+export async function loadBackups(adminToken: string): Promise<BackupSummary[]> {
+  const token = adminToken.trim()
+
+  if (!token) {
+    throw new Error('请先输入管理员密码。')
+  }
+
+  try {
+    const response = await fetch('/api/backups', {
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+
+    if (response.ok) {
+      const body = (await response.json()) as { backups?: BackupSummary[] }
+      return Array.isArray(body.backups) ? body.backups : []
+    }
+
+    if (response.status === 404) {
+      return []
+    }
+
+    const message = await response.text()
+    throw new Error(message || `读取备份失败：HTTP ${response.status}`)
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return []
+    }
+
+    throw error
+  }
+}
+
+export async function restoreBackup(
+  id: string,
+  adminToken: string,
+): Promise<SaveResult> {
+  const token = adminToken.trim()
+
+  if (!token) {
+    throw new Error('请先输入管理员密码。')
+  }
+
+  const response = await fetch('/api/backups/restore', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ id }),
+  })
+
+  if (response.ok) {
+    return (await response.json()) as SaveResult
+  }
+
+  const message = await response.text()
+  throw new Error(message || `恢复备份失败：HTTP ${response.status}`)
 }
 
 export function loadLocalDashboard() {

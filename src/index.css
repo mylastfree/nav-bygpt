@@ -313,6 +313,10 @@ h2 {
   background: color-mix(in srgb, var(--surface), var(--danger) 6%);
 }
 
+.backup-panel {
+  background: color-mix(in srgb, var(--surface), var(--primary-soft) 28%);
+}
+
 .maintenance-heading {
   display: flex;
   flex-wrap: wrap;
@@ -508,6 +512,52 @@ h2 {
   min-height: 32px;
   padding: 6px 9px;
   font-size: 12px;
+}
+
+.backup-list {
+  display: grid;
+  gap: 9px;
+}
+
+.backup-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.backup-main {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.backup-main strong,
+.backup-meta {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backup-main strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.backup-meta,
+.backup-empty {
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.backup-empty {
+  margin: 0;
 }
 
 input,
@@ -1320,7 +1370,8 @@ button:focus-visible {
 
   .group-header,
   .editor-line,
-  .link-check-card {
+  .link-check-card,
+  .backup-card {
     grid-template-columns: 1fr;
   }
 

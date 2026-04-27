@@ -57,6 +57,13 @@ export type DashboardBackup = {
   dashboard: DashboardData
 }
 
+export type BackupSummary = {
+  id: string
+  createdAt: string
+  groupCount: number
+  linkCount: number
+}
+
 export type SaveResult = {
   mode: 'cloud' | 'local'
   updatedAt: string

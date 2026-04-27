@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { LOCAL_DASHBOARD_KEY } from './dashboard'
-import { saveDashboard } from './api'
-import type { DashboardData } from './types'
+import { loadBackups, restoreBackup, saveDashboard } from './api'
+import type { BackupSummary, DashboardData } from './types'
 
 function dashboardWith(url: string): DashboardData {
   return {
@@ -115,5 +115,58 @@ describe('cloud dashboard api', () => {
 
     expect(store[LOCAL_DASHBOARD_KEY]).toBeUndefined()
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  test('loads backup summaries with bearer admin token', async () => {
+    const backups: BackupSummary[] = [
+      {
+        id: 'backup:2026-04-27T00-00-00-000Z',
+        createdAt: '2026-04-27T00:00:00.000Z',
+        groupCount: 1,
+        linkCount: 2,
+      },
+    ]
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(JSON.stringify({ backups }), { status: 200 })
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(loadBackups('secret')).resolves.toEqual(backups)
+    expect(fetchSpy).toHaveBeenCalledWith('/api/backups', {
+      headers: {
+        accept: 'application/json',
+        authorization: 'Bearer secret',
+      },
+    })
+  })
+
+  test('restores a backup through the protected Cloudflare endpoint', async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          mode: 'cloud',
+          updatedAt: '2026-04-27T00:00:01.000Z',
+        }),
+        { status: 200 },
+      )
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(
+      restoreBackup('backup:2026-04-27T00-00-00-000Z', 'secret'),
+    ).resolves.toEqual({
+      mode: 'cloud',
+      updatedAt: '2026-04-27T00:00:01.000Z',
+    })
+    expect(fetchSpy).toHaveBeenCalledWith('/api/backups/restore', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer secret',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id: 'backup:2026-04-27T00-00-00-000Z' }),
+    })
   })
 })

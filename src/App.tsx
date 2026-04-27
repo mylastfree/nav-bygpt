@@ -10,7 +10,9 @@ import {
 import {
   clearAdminToken,
   loadAdminToken,
+  loadBackups,
   loadDashboard,
+  restoreBackup,
   saveAdminToken,
   saveDashboard,
 } from './api'
@@ -43,6 +45,7 @@ import {
 } from './maintenance'
 import type {
   CardLayout,
+  BackupSummary,
   DashboardData,
   GroupColor,
   LinkItem,
@@ -135,6 +138,10 @@ function App() {
   const [dragOverLinkId, setDragOverLinkId] = useState('')
   const [highlightedLinkId, setHighlightedLinkId] = useState('')
   const [pendingImport, setPendingImport] = useState<PendingImportDraft | null>(null)
+  const [backups, setBackups] = useState<BackupSummary[]>([])
+  const [showBackups, setShowBackups] = useState(false)
+  const [isLoadingBackups, setIsLoadingBackups] = useState(false)
+  const [isRestoringBackup, setIsRestoringBackup] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -340,6 +347,45 @@ function App() {
       setStatus(error instanceof Error ? error.message : '保存失败')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function openBackupPanel() {
+    setIsLoadingBackups(true)
+    setStatus('正在读取备份...')
+
+    try {
+      const items = await loadBackups(adminToken)
+      setBackups(items)
+      setShowBackups(true)
+      setStatus(items.length > 0 ? `已读取 ${items.length} 个备份` : '还没有 KV 备份')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '读取备份失败')
+    } finally {
+      setIsLoadingBackups(false)
+    }
+  }
+
+  async function restoreBackupById(id: string) {
+    if (!confirm('恢复这个备份？恢复前会先自动备份当前 KV 数据。')) {
+      return
+    }
+
+    setIsRestoringBackup(true)
+    setStatus('正在恢复备份...')
+
+    try {
+      const result = await restoreBackup(id, adminToken)
+      const data = await loadDashboard()
+
+      setDashboard(data)
+      setActiveGroupId(data.groups[0]?.id ?? '')
+      setShowBackups(false)
+      setStatus(`已恢复备份，更新时间 ${formatBackupDate(result.updatedAt)}`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '恢复备份失败')
+    } finally {
+      setIsRestoringBackup(false)
     }
   }
 
@@ -736,6 +782,16 @@ function App() {
     setPendingImport(null)
   }
 
+  function formatBackupDate(value: string) {
+    const date = new Date(value)
+
+    if (Number.isNaN(date.getTime())) {
+      return value
+    }
+
+    return date.toLocaleString('zh-CN', { hour12: false })
+  }
+
   if (!dashboard) {
     return (
       <main className="page-shell">
@@ -817,6 +873,21 @@ function App() {
                 onClick={() => fileInputRef.current?.click()}
               >
                 导入
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  if (showBackups) {
+                    setShowBackups(false)
+                    return
+                  }
+
+                  void openBackupPanel()
+                }}
+                disabled={isLoadingBackups || isRestoringBackup}
+              >
+                {isLoadingBackups ? '读取中' : showBackups ? '关闭备份' : '备份'}
               </button>
               <button
                 type="button"
@@ -953,6 +1024,49 @@ function App() {
               </div>
             ) : null}
           </div>
+        </section>
+      ) : null}
+
+      {isEditing && showBackups ? (
+        <section className="notice-panel compact-notice backup-panel">
+          <div className="maintenance-heading">
+            <div>
+              <strong>KV 备份</strong>
+              <span>保存、导入和恢复前会自动留下备份；恢复动作仍需要管理员密码。</span>
+            </div>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => void openBackupPanel()}
+              disabled={isLoadingBackups || isRestoringBackup}
+            >
+              刷新
+            </button>
+          </div>
+          {backups.length > 0 ? (
+            <div className="backup-list">
+              {backups.map((backup) => (
+                <article className="backup-card" key={backup.id}>
+                  <div className="backup-main">
+                    <strong>{formatBackupDate(backup.createdAt)}</strong>
+                    <span className="backup-meta">
+                      {backup.groupCount} 个分组 · {backup.linkCount} 个网站
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => restoreBackupById(backup.id)}
+                    disabled={isRestoringBackup}
+                  >
+                    恢复
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="backup-empty">还没有可恢复的 KV 备份。</p>
+          )}
         </section>
       ) : null}
 
