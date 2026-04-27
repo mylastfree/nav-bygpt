@@ -35,8 +35,11 @@ import {
 import { isImportFileTooLarge, parseDashboardImport } from './importers'
 import {
   confirmLinkCheckResult,
+  createImportPreview,
   getStoredLinkCheckResults,
+  mergeImportedDashboard,
   removeDuplicateLinksByUrl,
+  type ImportPreview,
 } from './maintenance'
 import type {
   CardLayout,
@@ -70,6 +73,14 @@ type VisibleLink = {
   groupId: string
   groupName: string
   link: LinkItem
+}
+
+type PendingImportDraft = {
+  fileName: string
+  sourceName: string
+  dashboard: DashboardData
+  preview: ImportPreview
+  skippedCount: number
 }
 
 const cardLayoutLabels: Record<CardLayout, string> = {
@@ -123,6 +134,7 @@ function App() {
   const [draggingLinkId, setDraggingLinkId] = useState('')
   const [dragOverLinkId, setDragOverLinkId] = useState('')
   const [highlightedLinkId, setHighlightedLinkId] = useState('')
+  const [pendingImport, setPendingImport] = useState<PendingImportDraft | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -677,7 +689,7 @@ function App() {
   }
 
   async function importJson(file: File | undefined) {
-    if (!file) {
+    if (!file || !dashboard) {
       return
     }
 
@@ -689,13 +701,15 @@ function App() {
 
       const text = await file.text()
       const result = parseDashboardImport(file.name, text)
-      const skippedText =
-        result.skipped.length > 0 ? `，跳过 ${result.skipped.length} 条无效地址` : ''
 
-      setDashboard(result.dashboard)
-      setStatus(
-        `已导入 ${result.groupCount} 个分组、${result.linkCount} 个网站${skippedText}，点击保存后写入 Cloudflare KV`,
-      )
+      setPendingImport({
+        fileName: file.name,
+        sourceName: result.source === 'itab' ? 'iTab .itabdata' : '本程序 JSON',
+        dashboard: result.dashboard,
+        preview: createImportPreview(dashboard, result.dashboard),
+        skippedCount: result.skipped.length,
+      })
+      setStatus('已解析导入文件，请确认合并或覆盖')
     } catch (error) {
       setStatus(error instanceof Error ? `导入失败：${error.message}` : '导入失败，请检查文件')
     } finally {
@@ -703,6 +717,23 @@ function App() {
         fileInputRef.current.value = ''
       }
     }
+  }
+
+  function applyPendingImport(mode: 'merge' | 'replace') {
+    if (!pendingImport) {
+      return
+    }
+
+    if (mode === 'merge') {
+      updateDashboard((current) => mergeImportedDashboard(current, pendingImport.dashboard))
+      setStatus('已合并导入，重复网址已跳过，保存后写入 Cloudflare KV')
+    } else {
+      updateDashboard(() => pendingImport.dashboard)
+      setActiveGroupId(pendingImport.dashboard.groups[0]?.id ?? '')
+      setStatus('已覆盖当前数据，保存后写入 Cloudflare KV')
+    }
+
+    setPendingImport(null)
   }
 
   if (!dashboard) {
@@ -1281,6 +1312,79 @@ function App() {
           <section className="empty-panel">还没有分组，进入编辑模式后新增分组</section>
         )}
       </section>
+
+      {pendingImport ? (
+        <div className="import-preview-backdrop">
+          <section
+            className="import-preview-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-preview-title"
+          >
+            <div className="import-preview-body">
+              <h3 className="quick-edit-title" id="import-preview-title">
+                导入预览
+              </h3>
+              <p className="import-preview-file">
+                {pendingImport.fileName} · {pendingImport.sourceName}
+              </p>
+              <div className="import-preview-grid">
+                <span className="import-preview-stat">
+                  <strong>{pendingImport.preview.importedGroupCount}</strong>
+                  <small>导入分组</small>
+                </span>
+                <span className="import-preview-stat">
+                  <strong>{pendingImport.preview.importedLinkCount}</strong>
+                  <small>导入网站</small>
+                </span>
+                <span className="import-preview-stat">
+                  <strong>{pendingImport.preview.duplicateUrlCount}</strong>
+                  <small>重复网址</small>
+                </span>
+                <span className="import-preview-stat">
+                  <strong>{pendingImport.preview.mergeLinkCount}</strong>
+                  <small>合并后网站</small>
+                </span>
+                <span className="import-preview-stat">
+                  <strong>{pendingImport.skippedCount}</strong>
+                  <small>跳过地址</small>
+                </span>
+              </div>
+              {pendingImport.skippedCount > 0 ? (
+                <p className="field-error">
+                  已跳过内部地址或无效地址 {pendingImport.skippedCount} 条。
+                </p>
+              ) : null}
+              <div className="import-preview-actions">
+                <button type="button" className="ghost-button" onClick={exportJson}>
+                  先导出当前数据
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => applyPendingImport('merge')}
+                >
+                  合并导入
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button danger"
+                  onClick={() => applyPendingImport('replace')}
+                >
+                  覆盖当前全部数据
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => setPendingImport(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {quickEdit ? (
         <div className="quick-edit-backdrop">

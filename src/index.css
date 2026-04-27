@@ -1147,7 +1147,8 @@ button:focus-visible {
   font-size: 12px;
 }
 
-.quick-edit-backdrop {
+.quick-edit-backdrop,
+.import-preview-backdrop {
   position: fixed;
   inset: 0;
   z-index: 20;
@@ -1157,7 +1158,8 @@ button:focus-visible {
   background: color-mix(in srgb, #000000, transparent 55%);
 }
 
-.quick-edit-dialog {
+.quick-edit-dialog,
+.import-preview-dialog {
   width: min(430px, 100%);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1165,7 +1167,8 @@ button:focus-visible {
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
 }
 
-.quick-edit-form {
+.quick-edit-form,
+.import-preview-body {
   display: grid;
   gap: 14px;
   padding: 18px;
@@ -1181,6 +1184,63 @@ button:focus-visible {
 
 .dialog-actions {
   display: flex;
+  gap: 9px;
+  justify-content: flex-end;
+}
+
+.import-preview-dialog {
+  width: min(560px, 100%);
+}
+
+.import-preview-file {
+  overflow: hidden;
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.import-preview-stat {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.import-preview-stat strong,
+.import-preview-stat small {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-preview-stat strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.import-preview-stat small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.import-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 9px;
   justify-content: flex-end;
 }
