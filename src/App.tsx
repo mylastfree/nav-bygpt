@@ -218,6 +218,7 @@ function App() {
   const [tokenDraft, setTokenDraft] = useState('')
   const [showTokenForm, setShowTokenForm] = useState(false)
   const [status, setStatus] = useState('正在加载...')
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [activeGroupId, setActiveGroupId] = useState('')
   const [quickEdit, setQuickEdit] = useState<QuickEditDraft | null>(null)
@@ -419,6 +420,11 @@ function App() {
     ? getReplaceImportWarning(pendingImport.preview)
     : ''
 
+  function setUnsavedStatus(message = '已修改') {
+    setHasUnsavedChanges(true)
+    setStatus(`${message}，请记得保存到 Cloudflare KV`)
+  }
+
   function updateDashboard(updater: (current: DashboardData) => DashboardData) {
     setDashboard((current) => {
       if (!current) {
@@ -427,7 +433,7 @@ function App() {
 
       return updater(current)
     })
-    setStatus('有未保存修改')
+    setUnsavedStatus()
   }
 
   function rememberUndo(label: string, previousDashboard: DashboardData) {
@@ -447,7 +453,7 @@ function App() {
 
     rememberUndo(label, dashboard)
     setDashboard(updater(dashboard))
-    setStatus('有未保存修改')
+    setUnsavedStatus(`${label}已完成`)
   }
 
   function undoLastChange() {
@@ -460,7 +466,7 @@ function App() {
     setSelectedLinkIds(new Set())
     setCurrentLinkCheckResults([])
     setUndoEntry(null)
-    setStatus(`已撤销：${undoEntry.label}，保存后写入 Cloudflare KV`)
+    setUnsavedStatus(`已撤销：${undoEntry.label}`)
   }
 
   function unlockEditing(event: FormEvent<HTMLFormElement>) {
@@ -506,9 +512,20 @@ function App() {
   }
 
   function lockEditing() {
+    if (
+      hasUnsavedChanges &&
+      !confirm('当前有未保存修改。点“完成”只是退出编辑模式，不会保存到 Cloudflare KV。\n\n确定退出编辑模式吗？')
+    ) {
+      return
+    }
+
     setIsEditing(false)
     setShowTokenForm(false)
-    setStatus('已退出编辑模式')
+    setStatus(
+      hasUnsavedChanges
+        ? '已退出编辑模式，但仍有未保存修改，请回到编辑模式保存到 Cloudflare KV'
+        : '已退出编辑模式',
+    )
   }
 
   function forgetToken() {
@@ -538,6 +555,7 @@ function App() {
             }
           : current,
       )
+      setHasUnsavedChanges(false)
       setStatus(result.mode === 'cloud' ? '已保存到 Cloudflare KV' : '已保存到本机')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '保存失败')
@@ -621,6 +639,7 @@ function App() {
       setSelectedLinkIds(new Set())
       setCurrentLinkCheckResults([])
       setShowBackups(false)
+      setHasUnsavedChanges(false)
       setStatus(`已恢复备份，更新时间 ${formatBackupDate(result.updatedAt)}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '恢复备份失败')
@@ -730,13 +749,11 @@ function App() {
       const limitedCount = results.filter((result) => result.status === 'limited').length
       const statusMessage =
         brokenCount > 0
-          ? `已检测 ${results.length} 个网址，发现 ${brokenCount} 条疑似失效，${limitedCount} 条无法确认，保存后写入 Cloudflare KV`
+          ? `已检测 ${results.length} 个网址，发现 ${brokenCount} 条疑似失效，${limitedCount} 条无法确认`
           : limitedCount > 0
-            ? `已检测 ${results.length} 个网址，没有发现明确失效，${limitedCount} 条无法确认，保存后写入 Cloudflare KV`
-            : `已检测 ${results.length} 个网址，暂未发现疑似失效，保存后写入 Cloudflare KV`
-      setStatus(
-        statusMessage,
-      )
+            ? `已检测 ${results.length} 个网址，没有发现明确失效，${limitedCount} 条无法确认`
+            : `已检测 ${results.length} 个网址，暂未发现疑似失效`
+      setUnsavedStatus(statusMessage)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '检测网址失败')
     } finally {
@@ -967,7 +984,7 @@ function App() {
       ),
     )
     setHighlightedLinkId('')
-    setStatus('已确认链接没问题，保存后写入 Cloudflare KV')
+    setUnsavedStatus('已确认链接没问题')
   }
 
   function removeDuplicateGroup(duplicate: DuplicateLinkGroup) {
@@ -979,7 +996,7 @@ function App() {
       removeDuplicateLinksByUrl(current, duplicate.url),
     )
     setHighlightedLinkId('')
-    setStatus('已整理重复网址，保存后写入 Cloudflare KV')
+    setUnsavedStatus('已整理重复网址')
   }
 
   function toggleLinkSelection(linkId: string) {
@@ -1197,7 +1214,7 @@ function App() {
 
     const theme = nextThemePreference(dashboard.settings.theme)
     updateSetting('theme', theme)
-    setStatus(theme === 'dark' ? '已切换到深色，保存后写入 KV' : '已切换到浅色，保存后写入 KV')
+    setUnsavedStatus(theme === 'dark' ? '已切换到深色' : '已切换到浅色')
   }
 
   function exportJson() {
@@ -1263,11 +1280,11 @@ function App() {
       updateDashboardWithUndo('导入数据', (current) =>
         mergeImportedDashboard(current, pendingImport.dashboard),
       )
-      setStatus('已合并导入，重复网址已跳过，保存后写入 Cloudflare KV')
+      setUnsavedStatus('已合并导入，重复网址已跳过')
     } else {
       updateDashboardWithUndo('导入数据', () => pendingImport.dashboard)
       setActiveGroupId(pendingImport.dashboard.groups[0]?.id ?? '')
-      setStatus('已覆盖当前数据，保存后写入 Cloudflare KV')
+      setUnsavedStatus('已覆盖当前数据')
     }
 
     setSelectedLinkIds(new Set())
@@ -1307,8 +1324,11 @@ function App() {
           ) : (
             <h1>{dashboard.settings.title}</h1>
           )}
-          <span className="status">
-            {status} · v{APP_VERSION} · {dashboard.groups.length} 个分组 · {totalLinks} 个网站
+          <span className={`status ${hasUnsavedChanges ? 'status-unsaved' : ''}`}>
+            {hasUnsavedChanges ? <span className="status-flag">未保存</span> : null}
+            <span>
+              {status} · v{APP_VERSION} · {dashboard.groups.length} 个分组 · {totalLinks} 个网站
+            </span>
           </span>
         </div>
 
