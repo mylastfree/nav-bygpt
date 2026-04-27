@@ -15,6 +15,7 @@ import {
   restoreBackup,
   saveAdminToken,
   saveDashboard,
+  saveLinkClick,
 } from './api'
 import type { BackupSummary, DashboardData, LinkCheckResult } from './types'
 
@@ -298,6 +299,36 @@ describe('cloud dashboard api', () => {
       },
       body: JSON.stringify({
         links: [{ id: 'github', url: 'https://github.com' }],
+      }),
+    })
+  })
+
+  test('records link clicks through the protected Cloudflare endpoint', async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          mode: 'cloud',
+          updatedAt: '2026-04-27T00:00:01.000Z',
+        }),
+        { status: 200 },
+      )
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(saveLinkClick('daily', 'github', 'secret')).resolves.toEqual({
+      mode: 'cloud',
+      updatedAt: '2026-04-27T00:00:01.000Z',
+    })
+    expect(fetchSpy).toHaveBeenCalledWith('/api/link-click', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer secret',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        groupId: 'daily',
+        linkId: 'github',
       }),
     })
   })

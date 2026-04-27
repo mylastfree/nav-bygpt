@@ -99,6 +99,56 @@ export async function saveDashboard(
   }
 }
 
+export async function saveLinkClick(
+  groupId: string,
+  linkId: string,
+  adminToken: string,
+): Promise<SaveResult> {
+  const token = adminToken.trim()
+
+  if (!token) {
+    throw new Error('请输入管理员密码后再保存。')
+  }
+
+  try {
+    const response = await fetch('/api/link-click', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ groupId, linkId }),
+    })
+
+    if (response.ok) {
+      const result = (await response.json()) as SaveResult
+      return {
+        mode: 'cloud',
+        updatedAt: result.updatedAt || new Date().toISOString(),
+      }
+    }
+
+    const message = await response.text()
+    if (response.status === 404 && message === 'Not found.') {
+      return {
+        mode: 'local',
+        updatedAt: new Date().toISOString(),
+      }
+    }
+
+    throw new Error(message || `保存点击次数失败：HTTP ${response.status}`)
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return {
+        mode: 'local',
+        updatedAt: new Date().toISOString(),
+      }
+    }
+
+    throw error
+  }
+}
+
 export async function loadBackups(adminToken: string): Promise<BackupSummary[]> {
   const token = adminToken.trim()
 

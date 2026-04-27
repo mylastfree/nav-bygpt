@@ -15,12 +15,17 @@ describe('quick edit app contract', () => {
     expect(appSource).not.toContain('className="link-editor"')
   })
 
-  test('keeps click counts and drag sorting local until the user saves', () => {
+  test('auto-saves click counts only when an admin token is present', () => {
     expect(appSource).toContain('incrementLinkClickCount')
+    expect(appSource).toContain('saveLinkClick')
+    expect(appSource).toContain('saveLocalDashboard')
     expect(appSource).toContain('reorderLinkInGroup')
     expect(appSource).toContain('className="click-count"')
-    expect(appSource).toContain('function recordLinkClick(groupId: string, linkId: string)')
-    expect(appSource).toMatch(/function recordLinkClick[\s\S]*if \(!adminToken\) {\s*return\s*}[\s\S]*incrementLinkClickCount/)
+    expect(appSource).toContain('async function recordLinkClick(groupId: string, linkId: string)')
+    expect(appSource).toMatch(/async function recordLinkClick[\s\S]*if \(!adminToken \|\| !dashboard\) {\s*return\s*}/)
+    expect(appSource).toMatch(/async function recordLinkClick[\s\S]*incrementLinkClickCount\(dashboard, groupId, linkId\)/)
+    expect(appSource).toContain('await saveLinkClick(groupId, linkId, adminToken)')
+    expect(appSource).toContain("setStatus(result.mode === 'cloud' ? '点击次数已自动保存' : '点击次数已记录到本机')")
     expect(appSource).toContain('recordLinkClick(first.groupId, first.link.id)')
     expect(appSource).toContain('recordLinkClick(groupId, linkId)')
     expect(appSource).toMatch(/function handleSearchKeyDown[\s\S]*recordLinkClick\(first\.groupId, first\.link\.id\)[\s\S]*window\.open/)

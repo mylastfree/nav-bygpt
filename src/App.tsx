@@ -21,6 +21,8 @@ import {
   restoreBackup,
   saveAdminToken,
   saveDashboard,
+  saveLinkClick,
+  saveLocalDashboard,
 } from './api'
 import {
   CARD_LAYOUT_OPTIONS,
@@ -1056,12 +1058,40 @@ function App() {
     setSelectedLinkIds(new Set())
   }
 
-  function recordLinkClick(groupId: string, linkId: string) {
-    if (!adminToken) {
+  async function recordLinkClick(groupId: string, linkId: string) {
+    if (!adminToken || !dashboard) {
       return
     }
 
-    updateDashboard((current) => incrementLinkClickCount(current, groupId, linkId))
+    const nextDashboard = incrementLinkClickCount(dashboard, groupId, linkId)
+    setDashboard(nextDashboard)
+    saveLocalDashboard(nextDashboard)
+
+    if (hasUnsavedChanges) {
+      setUnsavedStatus('点击次数已本地记录')
+      return
+    }
+
+    try {
+      const result = await saveLinkClick(groupId, linkId, adminToken)
+      setDashboard((current) =>
+        current
+          ? {
+              ...current,
+              updatedAt: result.updatedAt,
+            }
+          : current,
+      )
+      setHasUnsavedChanges(false)
+      setStatus(result.mode === 'cloud' ? '点击次数已自动保存' : '点击次数已记录到本机')
+    } catch (error) {
+      setHasUnsavedChanges(true)
+      setStatus(
+        error instanceof Error
+          ? `点击次数已本地记录，自动保存失败：${error.message}`
+          : '点击次数已本地记录，自动保存失败',
+      )
+    }
   }
 
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -1080,7 +1110,7 @@ function App() {
     }
 
     event.preventDefault()
-    recordLinkClick(first.groupId, first.link.id)
+    void recordLinkClick(first.groupId, first.link.id)
     window.open(normalizeUrl(first.link.url), '_blank', 'noopener,noreferrer')
   }
 
@@ -1100,7 +1130,7 @@ function App() {
       return
     }
 
-    recordLinkClick(groupId, linkId)
+    void recordLinkClick(groupId, linkId)
   }
 
   function handleLinkDragStart(

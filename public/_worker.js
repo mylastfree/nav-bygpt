@@ -1,6 +1,6 @@
 const DASHBOARD_KEY = 'dashboard'
 const BACKUP_PREFIX = 'backup:'
-const APP_VERSION = '0.0.21'
+const APP_VERSION = '0.0.22'
 const MAX_BODY_BYTES = 10 * 1024 * 1024
 const MAX_GROUPS = 500
 const MAX_TOTAL_LINKS = 5000
@@ -83,6 +83,10 @@ export default {
 
     if (url.pathname === '/api/backups/restore' && request.method === 'POST') {
       return restoreBackup(request, env, context)
+    }
+
+    if (url.pathname === '/api/link-click' && request.method === 'POST') {
+      return recordLinkClick(request, env)
     }
 
     if (url.pathname === '/api/link-check' && request.method === 'POST') {
@@ -335,6 +339,95 @@ async function restoreBackup(request, env, context) {
   const next = {
     ...validation.data,
     updatedAt,
+  }
+
+  await env.STARTPAGE_KV.put(DASHBOARD_KEY, JSON.stringify(next), {
+    metadata: { updatedAt },
+  })
+
+  return json({
+    mode: 'cloud',
+    updatedAt,
+  })
+}
+
+async function recordLinkClick(request, env) {
+  const authError = requireAdmin(request, env)
+  if (authError) {
+    return authError
+  }
+
+  const contentLength = Number(request.headers.get('content-length') || '0')
+  if (contentLength > MAX_BODY_BYTES) {
+    return text('Link click request is too large.', 413)
+  }
+
+  const body = await request.text()
+  if (new TextEncoder().encode(body).length > MAX_BODY_BYTES) {
+    return text('Link click request is too large.', 413)
+  }
+
+  let parsed
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return text('Invalid JSON.', 400)
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return text('Invalid link click request.', 400)
+  }
+
+  const groupId = cleanText(parsed.groupId, 80)
+  const linkId = cleanText(parsed.linkId, 80)
+  if (!groupId || !linkId) {
+    return text('Invalid link id.', 400)
+  }
+
+  const raw = await env.STARTPAGE_KV.get(DASHBOARD_KEY)
+  if (!raw) {
+    return text('Dashboard not found.', 404)
+  }
+
+  let parsedDashboard
+  try {
+    parsedDashboard = JSON.parse(raw)
+  } catch {
+    return text('Invalid dashboard data.', 400)
+  }
+
+  const validation = validateDashboard(parsedDashboard)
+  if (!validation.ok) {
+    return text(validation.error, 400)
+  }
+
+  let found = false
+  const updatedAt = new Date().toISOString()
+  const next = {
+    ...validation.data,
+    updatedAt,
+    groups: validation.data.groups.map((group) =>
+      group.id === groupId
+        ? {
+            ...group,
+            links: group.links.map((link) => {
+              if (link.id !== linkId) {
+                return link
+              }
+
+              found = true
+              return {
+                ...link,
+                clickCount: normalizeClickCount(link.clickCount) + 1,
+              }
+            }),
+          }
+        : group,
+    ),
+  }
+
+  if (!found) {
+    return text('Link not found.', 404)
   }
 
   await env.STARTPAGE_KV.put(DASHBOARD_KEY, JSON.stringify(next), {
