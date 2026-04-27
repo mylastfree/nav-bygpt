@@ -123,6 +123,43 @@ describe('worker backup api', () => {
     ])
   })
 
+  test('downloads a backup JSON behind the admin token', async () => {
+    const kv = new MemoryKv()
+
+    await kv.put(
+      'backup:2026-04-27T02-00-00-000Z',
+      JSON.stringify(dashboard('Download me', 2)),
+    )
+
+    const unauthorized = await worker.fetch(
+      new Request(
+        'https://nav.example/api/backups/download?id=backup%3A2026-04-27T02-00-00-000Z',
+      ),
+      env(kv),
+      { waitUntil: vi.fn() },
+    )
+    const authorized = await worker.fetch(
+      new Request(
+        'https://nav.example/api/backups/download?id=backup%3A2026-04-27T02-00-00-000Z',
+        {
+          headers: { authorization: 'Bearer secret' },
+        },
+      ),
+      env(kv),
+      { waitUntil: vi.fn() },
+    )
+    const body = await authorized.json()
+
+    expect(unauthorized.status).toBe(401)
+    expect(authorized.status).toBe(200)
+    expect(authorized.headers.get('content-type')).toBe('application/json; charset=utf-8')
+    expect(authorized.headers.get('content-disposition')).toBe(
+      'attachment; filename="nav-backup-2026-04-27T02-00-00-000Z.json"',
+    )
+    expect(body.settings.title).toBe('Download me')
+    expect(body.groups[0].links).toHaveLength(2)
+  })
+
   test('restores a backup only after saving the current dashboard as a fresh backup', async () => {
     const kv = new MemoryKv()
     const waitUntil = vi.fn()

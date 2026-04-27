@@ -13,6 +13,7 @@ import type { DashboardSettings } from './types'
 
 export const LOCAL_DASHBOARD_KEY = 'cf-startpage-dashboard'
 export const LOCAL_ADMIN_TOKEN_KEY = 'cf-startpage-admin-token'
+export const LOCAL_ADMIN_TOKEN_REMEMBER_KEY = 'cf-startpage-admin-token-remember'
 export const CARD_LAYOUT_OPTIONS: CardLayout[] = ['comfortable', 'compact', 'list']
 export const GROUP_COLOR_OPTIONS: GroupColor[] = [
   'slate',

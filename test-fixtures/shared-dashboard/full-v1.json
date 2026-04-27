@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-27T08:00:00.000Z",
+  "settings": {
+    "title": "Shared Contract",
+    "theme": "dark",
+    "cardLayout": "list",
+    "wallpaper": {
+      "preset": "warm-gray",
+      "intensity": "soft"
+    }
+  },
+  "groups": [
+    {
+      "id": "dup-group",
+      "name": "Work",
+      "color": "teal",
+      "links": [
+        {
+          "id": "dup-link",
+          "title": "GitHub",
+          "url": "github.com",
+          "icon": " https://example.com/github.png ",
+          "clickCount": 7.8,
+          "check": {
+            "status": "limited",
+            "reason": "HEAD HTTP 403",
+            "checkedAt": "2026-04-27T07:00:00.000Z",
+            "confirmedAt": "2026-04-27T07:05:00.000Z"
+          }
+        },
+        {
+          "id": "dup-link",
+          "title": "Docs",
+          "url": "https://docs.example.com/",
+          "clickCount": -3,
+          "check": {
+            "status": "unknown",
+            "reason": "bad status",
+            "checkedAt": "2026-04-27T07:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dup-group",
+      "name": "",
+      "color": "not-a-color",
+      "links": [
+        {
+          "id": "no-title",
+          "title": "",
+          "url": "https://openai.com",
+          "clickCount": 2
+        }
+      ]
+    }
+  ]
+}

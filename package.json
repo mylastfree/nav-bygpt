@@ -1,7 +1,7 @@
 {
   "name": "cf-startpage",
   "private": true,
-  "version": "0.0.16",
+  "version": "0.0.17",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "cf:dev": "npm run build && npx wrangler pages dev dist --kv STARTPAGE_KV --binding ADMIN_TOKEN=dev-secret",
     "cf:deploy": "npm run build && npx wrangler pages deploy dist --project-name cf-startpage",
-    "package:direct": "powershell -ExecutionPolicy Bypass -File scripts/package-direct-upload.ps1"
+    "package:direct": "powershell -ExecutionPolicy Bypass -File scripts/package-direct-upload.ps1",
+    "smoke:direct": "node scripts/smoke-direct-upload.mjs"
   },
   "dependencies": {
     "react": "^19.2.5",

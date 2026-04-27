@@ -1,6 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { LOCAL_DASHBOARD_KEY } from './dashboard'
-import { checkLinks, loadBackups, restoreBackup, saveDashboard } from './api'
+import {
+  LOCAL_ADMIN_TOKEN_KEY,
+  LOCAL_ADMIN_TOKEN_REMEMBER_KEY,
+  LOCAL_DASHBOARD_KEY,
+} from './dashboard'
+import {
+  checkLinks,
+  clearAdminToken,
+  downloadBackup,
+  loadHealth,
+  loadAdminToken,
+  loadAdminTokenMode,
+  loadBackups,
+  restoreBackup,
+  saveAdminToken,
+  saveDashboard,
+} from './api'
 import type { BackupSummary, DashboardData, LinkCheckResult } from './types'
 
 function dashboardWith(url: string): DashboardData {
@@ -29,6 +44,20 @@ function dashboardWith(url: string): DashboardData {
 
 function stubLocalStorage(store: Record<string, string>) {
   vi.stubGlobal('localStorage', {
+    getItem(key: string) {
+      return store[key] ?? null
+    },
+    setItem(key: string, value: string) {
+      store[key] = value
+    },
+    removeItem(key: string) {
+      delete store[key]
+    },
+  })
+}
+
+function stubSessionStorage(store: Record<string, string>) {
+  vi.stubGlobal('sessionStorage', {
     getItem(key: string) {
       return store[key] ?? null
     },
@@ -141,6 +170,67 @@ describe('cloud dashboard api', () => {
     })
   })
 
+  test('loads public deployment health diagnostics', async () => {
+    const health = {
+      ok: true,
+      version: '0.0.16',
+      worker: true,
+      kvBound: true,
+      adminTokenConfigured: true,
+      dashboardExists: true,
+      dashboardUpdatedAt: '2026-04-27T00:00:00.000Z',
+      dashboardGroupCount: 1,
+      dashboardLinkCount: 2,
+    }
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(JSON.stringify(health), { status: 200 })
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(loadHealth()).resolves.toEqual(health)
+    expect(fetchSpy).toHaveBeenCalledWith('/api/health', {
+      headers: {
+        accept: 'application/json',
+      },
+    })
+  })
+
+  test('downloads backup JSON with bearer admin token', async () => {
+    const backup = dashboardWith('https://github.com')
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(JSON.stringify(backup), { status: 200 })
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(
+      downloadBackup('backup:2026-04-27T00-00-00-000Z', 'secret'),
+    ).resolves.toMatchObject({
+      settings: {
+        title: 'Stored nav',
+      },
+      groups: [
+        {
+          links: [
+            {
+              url: 'https://github.com',
+            },
+          ],
+        },
+      ],
+    })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/backups/download?id=backup%3A2026-04-27T00-00-00-000Z',
+      {
+        headers: {
+          accept: 'application/json',
+          authorization: 'Bearer secret',
+        },
+      },
+    )
+  })
+
   test('restores a backup through the protected Cloudflare endpoint', async () => {
     const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       return new Response(
@@ -210,5 +300,57 @@ describe('cloud dashboard api', () => {
         links: [{ id: 'github', url: 'https://github.com' }],
       }),
     })
+  })
+
+  test('stores the admin token only for the current session by default', () => {
+    const localStore: Record<string, string> = {}
+    const sessionStore: Record<string, string> = {}
+
+    stubLocalStorage(localStore)
+    stubSessionStorage(sessionStore)
+
+    saveAdminToken('secret', 'session')
+
+    expect(loadAdminToken()).toBe('secret')
+    expect(loadAdminTokenMode()).toBe('session')
+    expect(sessionStore[LOCAL_ADMIN_TOKEN_KEY]).toBe('secret')
+    expect(localStore[LOCAL_ADMIN_TOKEN_KEY]).toBeUndefined()
+    expect(localStore[LOCAL_ADMIN_TOKEN_REMEMBER_KEY]).toBe('session')
+  })
+
+  test('remembers the admin token on this device only when requested', () => {
+    const localStore: Record<string, string> = {}
+    const sessionStore: Record<string, string> = {}
+
+    stubLocalStorage(localStore)
+    stubSessionStorage(sessionStore)
+
+    saveAdminToken('secret', 'device')
+
+    expect(loadAdminToken()).toBe('secret')
+    expect(loadAdminTokenMode()).toBe('device')
+    expect(sessionStore[LOCAL_ADMIN_TOKEN_KEY]).toBe('secret')
+    expect(localStore[LOCAL_ADMIN_TOKEN_KEY]).toBe('secret')
+    expect(localStore[LOCAL_ADMIN_TOKEN_REMEMBER_KEY]).toBe('device')
+  })
+
+  test('loads and clears older remembered admin tokens from both storage areas', () => {
+    const localStore: Record<string, string> = {
+      [LOCAL_ADMIN_TOKEN_KEY]: 'old-secret',
+    }
+    const sessionStore: Record<string, string> = {}
+
+    stubLocalStorage(localStore)
+    stubSessionStorage(sessionStore)
+
+    expect(loadAdminToken()).toBe('old-secret')
+    expect(loadAdminTokenMode()).toBe('device')
+
+    clearAdminToken()
+
+    expect(loadAdminToken()).toBe('')
+    expect(sessionStore[LOCAL_ADMIN_TOKEN_KEY]).toBeUndefined()
+    expect(localStore[LOCAL_ADMIN_TOKEN_KEY]).toBeUndefined()
+    expect(localStore[LOCAL_ADMIN_TOKEN_REMEMBER_KEY]).toBeUndefined()
   })
 })

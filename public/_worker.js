@@ -1,5 +1,6 @@
 const DASHBOARD_KEY = 'dashboard'
 const BACKUP_PREFIX = 'backup:'
+const APP_VERSION = '0.0.17'
 const MAX_BODY_BYTES = 10 * 1024 * 1024
 const MAX_GROUPS = 500
 const MAX_TOTAL_LINKS = 5000
@@ -68,8 +69,16 @@ export default {
       return writeDashboard(request, env, context)
     }
 
+    if (url.pathname === '/api/health' && request.method === 'GET') {
+      return health(env)
+    }
+
     if (url.pathname === '/api/backups' && request.method === 'GET') {
       return listBackups(request, env)
+    }
+
+    if (url.pathname === '/api/backups/download' && request.method === 'GET') {
+      return downloadBackup(request, env)
     }
 
     if (url.pathname === '/api/backups/restore' && request.method === 'POST') {
@@ -150,6 +159,46 @@ async function writeDashboard(request, env, context) {
   })
 }
 
+async function health(env) {
+  const kvBound = Boolean(env.STARTPAGE_KV)
+  const adminTokenConfigured = Boolean(env.ADMIN_TOKEN)
+  let dashboardExists = false
+  let dashboardUpdatedAt = ''
+  let dashboardGroupCount = 0
+  let dashboardLinkCount = 0
+
+  if (kvBound) {
+    const raw = await env.STARTPAGE_KV.get(DASHBOARD_KEY)
+    dashboardExists = Boolean(raw)
+
+    if (raw) {
+      try {
+        const validation = validateDashboard(JSON.parse(raw))
+
+        if (validation.ok) {
+          dashboardUpdatedAt = validation.data.updatedAt
+          dashboardGroupCount = validation.data.groups.length
+          dashboardLinkCount = countLinks(validation.data)
+        }
+      } catch {
+        // Keep diagnostics public and non-fatal even if dashboard JSON is corrupt.
+      }
+    }
+  }
+
+  return json({
+    ok: kvBound && adminTokenConfigured,
+    version: APP_VERSION,
+    worker: true,
+    kvBound,
+    adminTokenConfigured,
+    dashboardExists,
+    dashboardUpdatedAt,
+    dashboardGroupCount,
+    dashboardLinkCount,
+  })
+}
+
 async function listBackups(request, env) {
   const authError = requireAdmin(request, env)
   if (authError) {
@@ -187,6 +236,40 @@ async function listBackups(request, env) {
 
   return json({
     backups: summaries.filter(Boolean).sort((a, b) => b.id.localeCompare(a.id)),
+  })
+}
+
+async function downloadBackup(request, env) {
+  const authError = requireAdmin(request, env)
+  if (authError) {
+    return authError
+  }
+
+  const url = new URL(request.url)
+  const id = cleanText(url.searchParams.get('id'), 200)
+  if (!id || !id.startsWith(BACKUP_PREFIX)) {
+    return text('Invalid backup id.', 400)
+  }
+
+  const backup = await env.STARTPAGE_KV.get(id)
+  if (!backup) {
+    return text('Backup not found.', 404)
+  }
+
+  let parsed
+  try {
+    parsed = JSON.parse(backup)
+  } catch {
+    return text('Invalid backup data.', 400)
+  }
+
+  const validation = validateDashboard(parsed)
+  if (!validation.ok) {
+    return text(validation.error, 400)
+  }
+
+  return json(validation.data, 200, {
+    'content-disposition': `attachment; filename="${backupFileName(id)}"`,
   })
 }
 
@@ -582,6 +665,10 @@ function backupCreatedAt(id) {
   return `${match[1]}:${match[2]}:${match[3]}.${match[4]}`
 }
 
+function backupFileName(id) {
+  return `nav-backup-${id.slice(BACKUP_PREFIX.length).replace(/[^a-zA-Z0-9._-]/g, '-')}.json`
+}
+
 async function trimBackups(kv) {
   const list = await kv.list({ prefix: BACKUP_PREFIX, limit: 1000 })
   const stale = list.keys
@@ -682,12 +769,13 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results
 }
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       'cache-control': 'no-store',
       'content-type': 'application/json; charset=utf-8',
+      ...extraHeaders,
     },
   })
 }

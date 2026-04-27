@@ -11,9 +11,12 @@ import {
 import {
   checkLinks,
   clearAdminToken,
+  downloadBackup,
   loadAdminToken,
+  loadAdminTokenMode,
   loadBackups,
   loadDashboard,
+  loadHealth,
   restoreBackup,
   saveAdminToken,
   saveDashboard,
@@ -51,11 +54,13 @@ import {
   type ImportPreview,
   type LinkCheckResult,
 } from './maintenance'
+import { APP_VERSION } from './version'
 import type {
   CardLayout,
   BackupSummary,
   DashboardData,
   GroupColor,
+  HealthStatus,
   LinkCheckRequestItem,
   LinkItem,
   WallpaperIntensity,
@@ -182,6 +187,24 @@ function formatStorageSize(bytes: number) {
   return `${(bytes / 1024).toFixed(1)} KB`
 }
 
+function backupDownloadFileName(backup: BackupSummary) {
+  const timestamp = backup.createdAt.replace(/[^a-zA-Z0-9._-]/g, '-')
+  return `nav-backup-${timestamp}.json`
+}
+
+function downloadBackupJson(dashboard: DashboardData, fileName: string) {
+  const blob = new Blob([JSON.stringify(dashboard, null, 2)], {
+    type: 'application/json',
+  })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+
+  link.href = url
+  link.download = fileName
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [query, setQuery] = useState('')
@@ -190,6 +213,7 @@ function App() {
   const [batchTargetGroupId, setBatchTargetGroupId] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [adminToken, setAdminToken] = useState(loadAdminToken)
+  const [adminTokenMode, setAdminTokenMode] = useState(loadAdminTokenMode)
   const [tokenDraft, setTokenDraft] = useState('')
   const [showTokenForm, setShowTokenForm] = useState(false)
   const [status, setStatus] = useState('正在加载...')
@@ -204,6 +228,7 @@ function App() {
   const [pendingImport, setPendingImport] = useState<PendingImportDraft | null>(null)
   const [backups, setBackups] = useState<BackupSummary[]>([])
   const [showBackups, setShowBackups] = useState(false)
+  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null)
   const [isLoadingBackups, setIsLoadingBackups] = useState(false)
   const [isRestoringBackup, setIsRestoringBackup] = useState(false)
   const [isCheckingLinks, setIsCheckingLinks] = useState(false)
@@ -446,7 +471,7 @@ function App() {
       return
     }
 
-    saveAdminToken(token)
+    saveAdminToken(token, adminTokenMode)
     setAdminToken(token)
     setTokenDraft('')
     setShowTokenForm(false)
@@ -473,6 +498,7 @@ function App() {
   function forgetToken() {
     clearAdminToken()
     setAdminToken('')
+    setAdminTokenMode('session')
     setIsEditing(false)
     setShowTokenForm(false)
     setStatus('已清除本机保存的管理员密码')
@@ -520,12 +546,48 @@ function App() {
     }
   }
 
-  async function restoreBackupById(id: string) {
+  async function refreshHealthStatus() {
+    setStatus('正在读取部署诊断...')
+
+    try {
+      const info = await loadHealth()
+      setHealthStatus(info)
+      setStatus(info.ok ? '部署诊断已刷新' : '部署诊断提示需要检查配置')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '读取部署诊断失败')
+    }
+  }
+
+  async function downloadBackupById(backup: BackupSummary) {
+    setStatus('正在下载备份...')
+
+    try {
+      const data = await downloadBackup(backup.id, adminToken)
+      downloadBackupJson(data, backupDownloadFileName(backup))
+      setStatus('已下载备份 JSON')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '下载备份失败')
+    }
+  }
+
+  function getRestoreBackupConfirmation(backup: BackupSummary) {
+    return [
+      '恢复这个备份？',
+      '',
+      `备份时间：${formatBackupDate(backup.createdAt)}`,
+      `分组：${backup.groupCount}`,
+      `网站：${backup.linkCount}`,
+      '',
+      '恢复前会先自动备份当前 KV 数据。',
+    ].join('\n')
+  }
+
+  async function restoreBackupById(backup: BackupSummary) {
     if (!dashboard) {
       return
     }
 
-    if (!confirm('恢复这个备份？恢复前会先自动备份当前 KV 数据。')) {
+    if (!confirm(getRestoreBackupConfirmation(backup))) {
       return
     }
 
@@ -534,7 +596,7 @@ function App() {
     setStatus('正在恢复备份...')
 
     try {
-      const result = await restoreBackup(id, adminToken)
+      const result = await restoreBackup(backup.id, adminToken)
       const data = await loadDashboard()
 
       rememberUndo('恢复备份', previousDashboard)
@@ -557,7 +619,7 @@ function App() {
       return
     }
 
-    await restoreBackupById(latestNonEmptyBackup.id)
+    await restoreBackupById(latestNonEmptyBackup)
   }
 
   async function runLinkCheck() {
@@ -1230,7 +1292,7 @@ function App() {
             <h1>{dashboard.settings.title}</h1>
           )}
           <span className="status">
-            {status} · {dashboard.groups.length} 个分组 · {totalLinks} 个网站
+            {status} · v{APP_VERSION} · {dashboard.groups.length} 个分组 · {totalLinks} 个网站
           </span>
         </div>
 
@@ -1343,6 +1405,28 @@ function App() {
             aria-label="管理员密码"
             autoFocus
           />
+          <div className="token-storage-options" role="radiogroup" aria-label="密码保存方式">
+            <label>
+              <input
+                type="radio"
+                name="admin-token-mode"
+                value="session"
+                checked={adminTokenMode === 'session'}
+                onChange={() => setAdminTokenMode('session')}
+              />
+              本次会话
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="admin-token-mode"
+                value="device"
+                checked={adminTokenMode === 'device'}
+                onChange={() => setAdminTokenMode('device')}
+              />
+              记住此设备
+            </label>
+          </div>
           <button type="submit" className="primary-button">
             解锁
           </button>
@@ -1461,6 +1545,13 @@ function App() {
               >
                 查看备份
               </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void refreshHealthStatus()}
+              >
+                部署诊断
+              </button>
             </div>
           </div>
           <div className="health-grid">
@@ -1472,6 +1563,14 @@ function App() {
             <span>无法确认 {dashboardHealth.limitedCount}</span>
             <span>正常 {dashboardHealth.okCount}</span>
             <span>本地约 {formatStorageSize(dashboardHealth.storageBytes)}</span>
+            {healthStatus ? (
+              <>
+                <span>部署 v{healthStatus.version}</span>
+                <span>KV {healthStatus.kvBound ? '已绑定' : '未绑定'}</span>
+                <span>密码 {healthStatus.adminTokenConfigured ? '已配置' : '未配置'}</span>
+                <span>线上网站 {healthStatus.dashboardLinkCount}</span>
+              </>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -1602,14 +1701,24 @@ function App() {
                       {backup.groupCount} 个分组 · {backup.linkCount} 个网站
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => restoreBackupById(backup.id)}
-                    disabled={isRestoringBackup}
-                  >
-                    恢复
-                  </button>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => void downloadBackupById(backup)}
+                      disabled={isRestoringBackup}
+                    >
+                      下载 JSON
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => void restoreBackupById(backup)}
+                      disabled={isRestoringBackup}
+                    >
+                      恢复
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>

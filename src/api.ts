@@ -1,6 +1,7 @@
 import {
   findInvalidLinks,
   LOCAL_ADMIN_TOKEN_KEY,
+  LOCAL_ADMIN_TOKEN_REMEMBER_KEY,
   LOCAL_DASHBOARD_KEY,
   sampleDashboard,
   sanitizeDashboard,
@@ -8,10 +9,13 @@ import {
 import type {
   BackupSummary,
   DashboardData,
+  HealthStatus,
   LinkCheckRequestItem,
   LinkCheckResponse,
   SaveResult,
 } from './types'
+
+export type AdminTokenStorageMode = 'session' | 'device'
 
 export async function loadDashboard(): Promise<DashboardData> {
   const localData = loadLocalDashboard()
@@ -130,6 +134,49 @@ export async function loadBackups(adminToken: string): Promise<BackupSummary[]> 
   }
 }
 
+export async function loadHealth(): Promise<HealthStatus> {
+  const response = await fetch('/api/health', {
+    headers: {
+      accept: 'application/json',
+    },
+  })
+
+  if (response.ok) {
+    return (await response.json()) as HealthStatus
+  }
+
+  const message = await response.text()
+  throw new Error(message || `读取部署诊断失败：HTTP ${response.status}`)
+}
+
+export async function downloadBackup(
+  id: string,
+  adminToken: string,
+): Promise<DashboardData> {
+  const token = adminToken.trim()
+
+  if (!token) {
+    throw new Error('请先输入管理员密码。')
+  }
+
+  const response = await fetch(
+    `/api/backups/download?id=${encodeURIComponent(id)}`,
+    {
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    },
+  )
+
+  if (response.ok) {
+    return sanitizeDashboard(await response.json())
+  }
+
+  const message = await response.text()
+  throw new Error(message || `下载备份失败：HTTP ${response.status}`)
+}
+
 export async function restoreBackup(
   id: string,
   adminToken: string,
@@ -206,13 +253,38 @@ export function saveLocalDashboard(dashboard: DashboardData) {
 }
 
 export function loadAdminToken() {
-  return localStorage.getItem(LOCAL_ADMIN_TOKEN_KEY) || ''
+  return (
+    sessionStorage.getItem(LOCAL_ADMIN_TOKEN_KEY) ||
+    localStorage.getItem(LOCAL_ADMIN_TOKEN_KEY) ||
+    ''
+  )
 }
 
-export function saveAdminToken(token: string) {
-  localStorage.setItem(LOCAL_ADMIN_TOKEN_KEY, token)
+export function loadAdminTokenMode(): AdminTokenStorageMode {
+  if (localStorage.getItem(LOCAL_ADMIN_TOKEN_KEY)) {
+    return 'device'
+  }
+
+  return localStorage.getItem(LOCAL_ADMIN_TOKEN_REMEMBER_KEY) === 'device'
+    ? 'device'
+    : 'session'
+}
+
+export function saveAdminToken(token: string, mode: AdminTokenStorageMode) {
+  sessionStorage.setItem(LOCAL_ADMIN_TOKEN_KEY, token)
+
+  if (mode === 'device') {
+    localStorage.setItem(LOCAL_ADMIN_TOKEN_KEY, token)
+    localStorage.setItem(LOCAL_ADMIN_TOKEN_REMEMBER_KEY, 'device')
+    return
+  }
+
+  localStorage.removeItem(LOCAL_ADMIN_TOKEN_KEY)
+  localStorage.setItem(LOCAL_ADMIN_TOKEN_REMEMBER_KEY, 'session')
 }
 
 export function clearAdminToken() {
+  sessionStorage.removeItem(LOCAL_ADMIN_TOKEN_KEY)
   localStorage.removeItem(LOCAL_ADMIN_TOKEN_KEY)
+  localStorage.removeItem(LOCAL_ADMIN_TOKEN_REMEMBER_KEY)
 }

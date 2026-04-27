@@ -296,6 +296,33 @@ h2 {
   box-shadow: var(--shadow-soft);
 }
 
+.token-storage-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.token-storage-options label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.token-storage-options input {
+  width: 14px;
+  min-height: 14px;
+  padding: 0;
+}
+
 .batch-actions {
   display: flex;
   flex: 1 1 420px;

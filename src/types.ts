@@ -84,3 +84,15 @@ export type SaveResult = {
   mode: 'cloud' | 'local'
   updatedAt: string
 }
+
+export type HealthStatus = {
+  ok: boolean
+  version: string
+  worker: boolean
+  kvBound: boolean
+  adminTokenConfigured: boolean
+  dashboardExists: boolean
+  dashboardUpdatedAt: string
+  dashboardGroupCount: number
+  dashboardLinkCount: number
+}
