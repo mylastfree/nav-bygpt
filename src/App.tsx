@@ -22,6 +22,9 @@ import {
   createGroupFromName,
   createLinkFromInput,
   faviconUrl,
+  type DuplicateLinkGroup,
+  findDuplicateLinkIds,
+  findDuplicateLinks,
   incrementLinkClickCount,
   isSafeUrl,
   moveItem,
@@ -30,6 +33,7 @@ import {
   reorderLinkInGroup,
 } from './dashboard'
 import { isImportFileTooLarge, parseDashboardImport } from './importers'
+import { removeDuplicateLinksByUrl } from './maintenance'
 import type {
   CardLayout,
   DashboardData,
@@ -108,6 +112,7 @@ function App() {
   const [quickEdit, setQuickEdit] = useState<QuickEditDraft | null>(null)
   const [draggingLinkId, setDraggingLinkId] = useState('')
   const [dragOverLinkId, setDragOverLinkId] = useState('')
+  const [highlightedLinkId, setHighlightedLinkId] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -215,6 +220,14 @@ function App() {
   const totalLinks = useMemo(() => {
     return dashboard?.groups.reduce((count, group) => count + group.links.length, 0) ?? 0
   }, [dashboard])
+
+  const duplicateLinks = useMemo(() => {
+    return dashboard ? findDuplicateLinks(dashboard) : []
+  }, [dashboard])
+
+  const duplicateLinkIds = useMemo(() => {
+    return findDuplicateLinkIds(duplicateLinks)
+  }, [duplicateLinks])
 
   const isGlobalSearch = !isEditing && searchScope === 'all' && query.trim().length > 0
 
@@ -468,8 +481,31 @@ function App() {
               links: group.links.filter((link) => link.id !== linkId),
             }
           : group,
-      ),
+        ),
     }))
+  }
+
+  function locateLink(groupId: string, linkId: string) {
+    setActiveGroupId(groupId)
+    setSearchScope('group')
+    setQuery('')
+    setHighlightedLinkId(linkId)
+
+    window.setTimeout(() => {
+      document
+        .getElementById(`link-card-${linkId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
+  }
+
+  function removeDuplicateGroup(duplicate: DuplicateLinkGroup) {
+    if (!confirm('保留第一个网址，删除其它重复项？')) {
+      return
+    }
+
+    updateDashboard((current) => removeDuplicateLinksByUrl(current, duplicate.url))
+    setHighlightedLinkId('')
+    setStatus('已整理重复网址，保存后写入 Cloudflare KV')
   }
 
   function handleLinkClick(
@@ -949,12 +985,91 @@ function App() {
               ) : null}
             </div>
 
+            {isEditing && duplicateLinks.length > 0 ? (
+              <section className="notice-panel compact-notice duplicate-panel">
+                <div className="maintenance-heading">
+                  <div>
+                    <strong>发现 {duplicateLinks.length} 组重复网址</strong>
+                    <span>重复卡片已高亮，可以先定位确认，再编辑、删除或批量整理。</span>
+                  </div>
+                </div>
+                <div className="duplicate-list">
+                  {duplicateLinks.map((duplicate) => (
+                    <article className="duplicate-card" key={duplicate.url}>
+                      <div className="duplicate-url">{duplicate.url}</div>
+                      {duplicate.occurrences.map((item) => (
+                        <div className="duplicate-occurrence" key={`${item.groupId}-${item.link.id}`}>
+                          <div className="duplicate-occurrence-main">
+                            <strong>
+                              {item.groupName} / {item.link.title}
+                            </strong>
+                            <span>{normalizeUrl(item.link.url)}</span>
+                          </div>
+                          <div className="row-actions duplicate-actions">
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => locateLink(item.groupId, item.link.id)}
+                            >
+                              定位
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => {
+                                locateLink(item.groupId, item.link.id)
+                                startQuickEditLink(item.groupId, item.link)
+                              }}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button danger"
+                              onClick={() => deleteLink(item.groupId, item.link.id)}
+                            >
+                              删除
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() =>
+                                window.open(
+                                  normalizeUrl(item.link.url),
+                                  '_blank',
+                                  'noopener,noreferrer',
+                                )
+                              }
+                            >
+                              打开
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="ghost-button danger"
+                          onClick={() => removeDuplicateGroup(duplicate)}
+                        >
+                          保留第一个，删除其它
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             <div className="link-grid">
               {visibleLinkItems.map(({ groupId, groupName, link }) => (
                 <article
+                  id={`link-card-${link.id}`}
                   className={`link-card-shell ${
                     draggingLinkId === link.id ? 'is-dragging' : ''
-                  } ${dragOverLinkId === link.id ? 'is-drag-over' : ''}`}
+                  } ${dragOverLinkId === link.id ? 'is-drag-over' : ''} ${
+                    isEditing && duplicateLinkIds.has(link.id) ? 'is-duplicate' : ''
+                  } ${isEditing && highlightedLinkId === link.id ? 'is-located' : ''}`}
                   draggable={isEditing}
                   onDragStart={(event) => handleLinkDragStart(event, link.id)}
                   onDragOver={(event) => handleLinkDragOver(event, link.id)}
@@ -983,6 +1098,10 @@ function App() {
                         ×
                       </button>
                     </span>
+                  ) : null}
+
+                  {isEditing && duplicateLinkIds.has(link.id) ? (
+                    <span className="editor-badge">重复</span>
                   ) : null}
 
                   <a
