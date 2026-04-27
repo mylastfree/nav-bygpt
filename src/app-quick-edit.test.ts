@@ -19,7 +19,12 @@ describe('quick edit app contract', () => {
     expect(appSource).toContain('incrementLinkClickCount')
     expect(appSource).toContain('reorderLinkInGroup')
     expect(appSource).toContain('className="click-count"')
-    expect(appSource).toContain('draggable={isEditing}')
+    expect(appSource).toContain('const [suppressedClickLinkId, setSuppressedClickLinkId]')
+    expect(appSource).toContain('const canDragSortLinks = Boolean(isEditing && activeGroup && !isGlobalSearch)')
+    expect(appSource).toContain('draggable={canDragSortLinks}')
+    expect(appSource).toContain('setSuppressedClickLinkId(sourceLinkId)')
+    expect(appSource).toContain('if (suppressedClickLinkId === linkId || draggingLinkId === linkId)')
+    expect(appSource).toContain("current === sourceLinkId ? '' : current")
   })
 
   test('offers undo and batch selected link operations in edit mode', () => {

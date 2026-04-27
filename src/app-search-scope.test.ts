@@ -20,6 +20,16 @@ describe('search scope contract', () => {
     expect(appSource).toContain('handleLinkClick(event, groupId, link.id)')
   })
 
+  test('supports keyboard shortcuts in the search box', () => {
+    expect(appSource).toContain('function handleSearchKeyDown(')
+    expect(appSource).toContain("if (event.key === 'Escape')")
+    expect(appSource).toContain("if (event.key !== 'Enter' || isEditing)")
+    expect(appSource).toContain('const first = visibleLinkItems[0]')
+    expect(appSource).toContain('incrementLinkClickCount(current, first.groupId, first.link.id)')
+    expect(appSource).toContain("window.open(normalizeUrl(first.link.url), '_blank', 'noopener,noreferrer')")
+    expect(appSource).toContain('onKeyDown={handleSearchKeyDown}')
+  })
+
   test('styles the compact search scope control and result group label', () => {
     expect(css).toContain('.compact-select')
     expect(css).toContain('.link-group-name')

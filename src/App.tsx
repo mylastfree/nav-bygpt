@@ -1,6 +1,7 @@
 import {
   type DragEvent,
   type FormEvent,
+  type KeyboardEvent,
   type MouseEvent,
   useEffect,
   useMemo,
@@ -162,6 +163,7 @@ function App() {
   const [quickEdit, setQuickEdit] = useState<QuickEditDraft | null>(null)
   const [draggingLinkId, setDraggingLinkId] = useState('')
   const [dragOverLinkId, setDragOverLinkId] = useState('')
+  const [suppressedClickLinkId, setSuppressedClickLinkId] = useState('')
   const [highlightedLinkId, setHighlightedLinkId] = useState('')
   const [undoEntry, setUndoEntry] = useState<UndoEntry | null>(null)
   const [pendingImport, setPendingImport] = useState<PendingImportDraft | null>(null)
@@ -346,6 +348,7 @@ function App() {
   }, [backups, dashboard])
 
   const isGlobalSearch = !isEditing && searchScope === 'all' && query.trim().length > 0
+  const canDragSortLinks = Boolean(isEditing && activeGroup && !isGlobalSearch)
   const selectedCount = selectedLinkIds.size
 
   function updateDashboard(updater: (current: DashboardData) => DashboardData) {
@@ -902,11 +905,37 @@ function App() {
     setSelectedLinkIds(new Set())
   }
 
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      setQuery('')
+      return
+    }
+
+    if (event.key !== 'Enter' || isEditing) {
+      return
+    }
+
+    const first = visibleLinkItems[0]
+    if (!first) {
+      return
+    }
+
+    event.preventDefault()
+    updateDashboard((current) => incrementLinkClickCount(current, first.groupId, first.link.id))
+    window.open(normalizeUrl(first.link.url), '_blank', 'noopener,noreferrer')
+  }
+
   function handleLinkClick(
     event: MouseEvent<HTMLAnchorElement>,
     groupId: string,
     linkId: string,
   ) {
+    if (suppressedClickLinkId === linkId || draggingLinkId === linkId) {
+      event.preventDefault()
+      setSuppressedClickLinkId('')
+      return
+    }
+
     if (isEditing) {
       event.preventDefault()
       return
@@ -915,8 +944,13 @@ function App() {
     updateDashboard((current) => incrementLinkClickCount(current, groupId, linkId))
   }
 
-  function handleLinkDragStart(event: DragEvent<HTMLElement>, linkId: string) {
-    if (!isEditing) {
+  function handleLinkDragStart(
+    event: DragEvent<HTMLElement>,
+    groupId: string,
+    linkId: string,
+  ) {
+    if (!canDragSortLinks || groupId !== activeGroup?.id) {
+      event.preventDefault()
       return
     }
 
@@ -925,8 +959,17 @@ function App() {
     event.dataTransfer.setData('text/plain', linkId)
   }
 
-  function handleLinkDragOver(event: DragEvent<HTMLElement>, linkId: string) {
-    if (!isEditing || draggingLinkId === linkId) {
+  function handleLinkDragOver(
+    event: DragEvent<HTMLElement>,
+    groupId: string,
+    linkId: string,
+  ) {
+    if (
+      !canDragSortLinks ||
+      groupId !== activeGroup?.id ||
+      !draggingLinkId ||
+      draggingLinkId === linkId
+    ) {
       return
     }
 
@@ -940,7 +983,8 @@ function App() {
     groupId: string,
     targetLinkId: string,
   ) {
-    if (!isEditing) {
+    if (!canDragSortLinks || groupId !== activeGroup?.id) {
+      resetLinkDrag()
       return
     }
 
@@ -952,6 +996,11 @@ function App() {
     if (!sourceLinkId || sourceLinkId === targetLinkId) {
       return
     }
+
+    setSuppressedClickLinkId(sourceLinkId)
+    window.setTimeout(() => {
+      setSuppressedClickLinkId((current) => (current === sourceLinkId ? '' : current))
+    }, 250)
 
     updateDashboardWithUndo('调整网址排序', (current) =>
       reorderLinkInGroup(current, groupId, sourceLinkId, targetLinkId),
@@ -1128,6 +1177,7 @@ function App() {
             className="search-input"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={handleSearchKeyDown}
             placeholder="搜索网站"
             aria-label="搜索网站"
           />
@@ -1781,9 +1831,9 @@ function App() {
                       ? `has-link-check is-${problemLinkStatusById.get(link.id)}`
                       : ''
                   } ${isEditing && highlightedLinkId === link.id ? 'is-located' : ''}`}
-                  draggable={isEditing}
-                  onDragStart={(event) => handleLinkDragStart(event, link.id)}
-                  onDragOver={(event) => handleLinkDragOver(event, link.id)}
+                  draggable={canDragSortLinks}
+                  onDragStart={(event) => handleLinkDragStart(event, groupId, link.id)}
+                  onDragOver={(event) => handleLinkDragOver(event, groupId, link.id)}
                   onDrop={(event) => handleLinkDrop(event, groupId, link.id)}
                   onDragEnd={resetLinkDrag}
                   key={link.id}
