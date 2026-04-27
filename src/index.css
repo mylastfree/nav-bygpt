@@ -309,6 +309,10 @@ h2 {
   background: color-mix(in srgb, var(--surface), var(--accent) 7%);
 }
 
+.link-check-panel {
+  background: color-mix(in srgb, var(--surface), var(--danger) 6%);
+}
+
 .maintenance-heading {
   display: flex;
   flex-wrap: wrap;
@@ -426,6 +430,81 @@ h2 {
 
 .duplicate-actions .ghost-button,
 .duplicate-card > .row-actions .ghost-button {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.link-check-list,
+.link-check-main {
+  display: grid;
+  gap: 9px;
+}
+
+.link-check-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.link-check-card.is-broken {
+  border-color: color-mix(in srgb, var(--danger), var(--border) 32%);
+  background: color-mix(in srgb, var(--danger), var(--surface) 92%);
+}
+
+.link-check-card.is-limited {
+  border-color: color-mix(in srgb, var(--accent), var(--border) 32%);
+  background: color-mix(in srgb, var(--accent), var(--surface) 92%);
+}
+
+.link-check-main {
+  min-width: 0;
+  gap: 4px;
+}
+
+.link-check-main strong,
+.link-check-main span,
+.link-check-main small {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-check-main strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.link-check-main span,
+.link-check-main small {
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.link-check-main .link-check-status {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-strong), transparent 18%);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.link-check-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.link-check-actions .ghost-button {
   min-height: 32px;
   padding: 6px 9px;
   font-size: 12px;
@@ -802,6 +881,16 @@ button:focus-visible {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 72%);
 }
 
+.link-card-shell.has-link-check.is-broken .link-card {
+  border-color: color-mix(in srgb, var(--danger), var(--border) 24%);
+  background: color-mix(in srgb, var(--danger), var(--surface-muted) 92%);
+}
+
+.link-card-shell.has-link-check.is-limited .link-card {
+  border-color: color-mix(in srgb, var(--accent), var(--border) 24%);
+  background: color-mix(in srgb, var(--accent), var(--surface-muted) 92%);
+}
+
 .link-card-shell.is-located .link-card {
   border-color: var(--focus);
   box-shadow:
@@ -839,6 +928,13 @@ button:focus-visible {
   font-size: 12px;
   font-weight: 780;
   line-height: 1.2;
+}
+
+.health-badge {
+  top: auto;
+  bottom: 8px;
+  background: color-mix(in srgb, var(--danger), var(--surface) 82%);
+  pointer-events: none;
 }
 
 .link-card {
@@ -1163,7 +1259,8 @@ button:focus-visible {
   }
 
   .group-header,
-  .editor-line {
+  .editor-line,
+  .link-check-card {
     grid-template-columns: 1fr;
   }
 

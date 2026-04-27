@@ -33,7 +33,11 @@ import {
   reorderLinkInGroup,
 } from './dashboard'
 import { isImportFileTooLarge, parseDashboardImport } from './importers'
-import { removeDuplicateLinksByUrl } from './maintenance'
+import {
+  confirmLinkCheckResult,
+  getStoredLinkCheckResults,
+  removeDuplicateLinksByUrl,
+} from './maintenance'
 import type {
   CardLayout,
   DashboardData,
@@ -96,6 +100,12 @@ const groupColorLabels: Record<GroupColor, string> = {
   rose: '红',
   purple: '紫',
   teal: '青',
+}
+
+const linkCheckStatusLabels: Record<NonNullable<LinkItem['check']>['status'], string> = {
+  ok: '正常',
+  limited: '受限',
+  broken: '疑似失效',
 }
 
 function App() {
@@ -228,6 +238,18 @@ function App() {
   const duplicateLinkIds = useMemo(() => {
     return findDuplicateLinkIds(duplicateLinks)
   }, [duplicateLinks])
+
+  const linkCheckResults = useMemo(() => {
+    return dashboard ? getStoredLinkCheckResults(dashboard) : []
+  }, [dashboard])
+
+  const problemLinkChecks = useMemo(() => {
+    return linkCheckResults.filter((check) => check.status !== 'ok')
+  }, [linkCheckResults])
+
+  const problemLinkStatusById = useMemo(() => {
+    return new Map(problemLinkChecks.map((check) => [check.linkId, check.status]))
+  }, [problemLinkChecks])
 
   const isGlobalSearch = !isEditing && searchScope === 'all' && query.trim().length > 0
 
@@ -485,6 +507,12 @@ function App() {
     }))
   }
 
+  function findLinkForCheck(groupId: string, linkId: string) {
+    const group = dashboard?.groups.find((item) => item.id === groupId)
+
+    return group?.links.find((link) => link.id === linkId) ?? null
+  }
+
   function locateLink(groupId: string, linkId: string) {
     setActiveGroupId(groupId)
     setSearchScope('group')
@@ -496,6 +524,14 @@ function App() {
         .getElementById(`link-card-${linkId}`)
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 0)
+  }
+
+  function confirmHealthyLink(linkId: string) {
+    updateDashboard((current) =>
+      confirmLinkCheckResult(current, linkId, new Date().toISOString()),
+    )
+    setHighlightedLinkId('')
+    setStatus('已确认链接没问题，保存后写入 Cloudflare KV')
   }
 
   function removeDuplicateGroup(duplicate: DuplicateLinkGroup) {
@@ -1061,6 +1097,86 @@ function App() {
               </section>
             ) : null}
 
+            {isEditing && problemLinkChecks.length > 0 ? (
+              <section className="notice-panel compact-notice link-check-panel">
+                <div className="maintenance-heading">
+                  <div>
+                    <strong>发现 {problemLinkChecks.length} 条疑似问题链接</strong>
+                    <span>检测结果可能误判，请先定位或打开确认；确认没问题后会从问题清单移出。</span>
+                  </div>
+                </div>
+                <div className="link-check-list">
+                  {problemLinkChecks.map((item) => (
+                    <article
+                      className={`link-check-card is-${item.status}`}
+                      key={`${item.groupId}-${item.linkId}`}
+                    >
+                      <div className="link-check-main">
+                        <span className="link-check-status">
+                          {linkCheckStatusLabels[item.status]}
+                        </span>
+                        <strong>
+                          {item.groupName} / {item.title}
+                        </strong>
+                        <span>{normalizeUrl(item.url)}</span>
+                        <small>{item.reason}</small>
+                      </div>
+                      <div className="row-actions link-check-actions">
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => locateLink(item.groupId, item.linkId)}
+                        >
+                          定位
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => {
+                            const link = findLinkForCheck(item.groupId, item.linkId)
+
+                            locateLink(item.groupId, item.linkId)
+                            if (link) {
+                              startQuickEditLink(item.groupId, link)
+                            }
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button danger"
+                          onClick={() => deleteLink(item.groupId, item.linkId)}
+                        >
+                          删除
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() =>
+                            window.open(
+                              normalizeUrl(item.url),
+                              '_blank',
+                              'noopener,noreferrer',
+                            )
+                          }
+                        >
+                          打开
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => confirmHealthyLink(item.linkId)}
+                        >
+                          确认没问题
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             <div className="link-grid">
               {visibleLinkItems.map(({ groupId, groupName, link }) => (
                 <article
@@ -1069,6 +1185,10 @@ function App() {
                     draggingLinkId === link.id ? 'is-dragging' : ''
                   } ${dragOverLinkId === link.id ? 'is-drag-over' : ''} ${
                     isEditing && duplicateLinkIds.has(link.id) ? 'is-duplicate' : ''
+                  } ${
+                    isEditing && problemLinkStatusById.get(link.id)
+                      ? `has-link-check is-${problemLinkStatusById.get(link.id)}`
+                      : ''
                   } ${isEditing && highlightedLinkId === link.id ? 'is-located' : ''}`}
                   draggable={isEditing}
                   onDragStart={(event) => handleLinkDragStart(event, link.id)}
@@ -1102,6 +1222,12 @@ function App() {
 
                   {isEditing && duplicateLinkIds.has(link.id) ? (
                     <span className="editor-badge">重复</span>
+                  ) : null}
+
+                  {isEditing && problemLinkStatusById.get(link.id) ? (
+                    <span className="editor-badge health-badge">
+                      {linkCheckStatusLabels[problemLinkStatusById.get(link.id)!]}
+                    </span>
                   ) : null}
 
                   <a
