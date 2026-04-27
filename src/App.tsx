@@ -2246,6 +2246,9 @@ function App() {
                   已跳过内部地址或无效地址 {pendingImport.skippedCount} 条。
                 </p>
               ) : null}
+            </div>
+            <div className="import-preview-footer" aria-label="导入确认操作">
+              <span className="import-preview-footer-title">确认导入方式</span>
               <div className="import-preview-actions">
                 <button type="button" className="ghost-button" onClick={exportJson}>
                   先导出当前数据

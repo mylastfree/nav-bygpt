@@ -1474,6 +1474,14 @@ button:focus-visible {
 
 .import-preview-dialog {
   width: min(560px, 100%);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  max-height: min(720px, calc(100vh - 36px));
+  overflow: hidden;
+}
+
+.import-preview-body {
+  overflow: auto;
 }
 
 .import-preview-file {
@@ -1534,8 +1542,28 @@ button:focus-visible {
   line-height: 1.45;
 }
 
+.import-preview-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface), var(--surface-muted) 42%);
+}
+
+.import-preview-footer-title {
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 780;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
 .import-preview-actions {
   display: flex;
+  flex: 1 1 360px;
   flex-wrap: wrap;
   gap: 9px;
   justify-content: flex-end;
@@ -1625,6 +1653,24 @@ button:focus-visible {
 
   .row-actions {
     justify-content: flex-start;
+  }
+
+  .import-preview-footer {
+    align-items: stretch;
+  }
+
+  .import-preview-footer-title,
+  .import-preview-actions {
+    width: 100%;
+  }
+
+  .import-preview-actions {
+    justify-content: flex-start;
+  }
+
+  .import-preview-actions .ghost-button,
+  .import-preview-actions .primary-button {
+    flex: 1 1 auto;
   }
 
   .link-grid {
