@@ -395,6 +395,11 @@ button:focus-visible {
     linear-gradient(180deg, color-mix(in srgb, var(--surface), white 5%), var(--surface));
 }
 
+.compact-select {
+  width: 118px;
+  min-width: 118px;
+}
+
 .title-input {
   max-width: 440px;
   font-size: 26px;
@@ -805,6 +810,18 @@ button:focus-visible {
   text-align: right;
 }
 
+.link-group-name {
+  grid-column: 2;
+  overflow: hidden;
+  min-width: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .add-card {
   display: grid;
   min-height: 108px;
@@ -882,6 +899,11 @@ button:focus-visible {
 
 :root[data-card-layout='list'] .link-card small {
   display: none;
+}
+
+:root[data-card-layout='list'] .link-group-name {
+  grid-column: 2;
+  grid-row: 2;
 }
 
 :root[data-card-layout='list'] .card-actions {

@@ -56,6 +56,14 @@ type QuickEditDraft =
       icon: string
     }
 
+type SearchScope = 'group' | 'all'
+
+type VisibleLink = {
+  groupId: string
+  groupName: string
+  link: LinkItem
+}
+
 const cardLayoutLabels: Record<CardLayout, string> = {
   comfortable: '舒适卡片',
   compact: '紧凑卡片',
@@ -89,6 +97,7 @@ const groupColorLabels: Record<GroupColor, string> = {
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [query, setQuery] = useState('')
+  const [searchScope, setSearchScope] = useState<SearchScope>('group')
   const [isEditing, setIsEditing] = useState(false)
   const [adminToken, setAdminToken] = useState(loadAdminToken)
   const [tokenDraft, setTokenDraft] = useState('')
@@ -173,28 +182,41 @@ function App() {
     return dashboard.groups.findIndex((group) => group.id === activeGroup.id)
   }, [activeGroup, dashboard])
 
-  const visibleLinks = useMemo(() => {
-    if (!activeGroup) {
+  const visibleLinkItems = useMemo<VisibleLink[]>(() => {
+    if (!dashboard || !activeGroup) {
       return []
     }
 
     const keyword = query.trim().toLocaleLowerCase()
+    const sourceGroups =
+      searchScope === 'all' && !isEditing && keyword ? dashboard.groups : [activeGroup]
 
-    if (!keyword || isEditing) {
-      return activeGroup.links
-    }
+    return sourceGroups.flatMap((group) =>
+      group.links
+        .map((link) => ({
+          groupId: group.id,
+          groupName: group.name,
+          link,
+        }))
+        .filter((item) => {
+          if (!keyword || isEditing) {
+            return true
+          }
 
-    return activeGroup.links.filter((link) => {
-      return (
-        link.title.toLocaleLowerCase().includes(keyword) ||
-        link.url.toLocaleLowerCase().includes(keyword)
-      )
-    })
-  }, [activeGroup, isEditing, query])
+          return (
+            item.link.title.toLocaleLowerCase().includes(keyword) ||
+            item.link.url.toLocaleLowerCase().includes(keyword) ||
+            item.groupName.toLocaleLowerCase().includes(keyword)
+          )
+        }),
+    )
+  }, [activeGroup, dashboard, isEditing, query, searchScope])
 
   const totalLinks = useMemo(() => {
     return dashboard?.groups.reduce((count, group) => count + group.links.length, 0) ?? 0
   }, [dashboard])
+
+  const isGlobalSearch = !isEditing && searchScope === 'all' && query.trim().length > 0
 
   function updateDashboard(updater: (current: DashboardData) => DashboardData) {
     setDashboard((current) => {
@@ -646,6 +668,16 @@ function App() {
             placeholder="搜索网站"
             aria-label="搜索网站"
           />
+          <select
+            className="select-input compact-select"
+            value={searchScope}
+            onChange={(event) => setSearchScope(event.target.value as SearchScope)}
+            aria-label="搜索范围"
+            disabled={isEditing}
+          >
+            <option value="group">当前分组</option>
+            <option value="all">全部分组</option>
+          </select>
           <button
             type="button"
             className="icon-button theme-toggle-button"
@@ -883,9 +915,11 @@ function App() {
           <section className="group-section active-group-panel">
             <div className="group-header">
               <div className="group-title-area">
-                <h2>{activeGroup.name}</h2>
+                <h2>{isGlobalSearch ? '全部搜索结果' : activeGroup.name}</h2>
                 <span className="group-meta">
-                  {activeGroup.links.length} 个网站
+                  {isGlobalSearch
+                    ? `${visibleLinkItems.length} 个匹配网站`
+                    : `${activeGroup.links.length} 个网站`}
                 </span>
               </div>
 
@@ -916,7 +950,7 @@ function App() {
             </div>
 
             <div className="link-grid">
-              {visibleLinks.map((link) => (
+              {visibleLinkItems.map(({ groupId, groupName, link }) => (
                 <article
                   className={`link-card-shell ${
                     draggingLinkId === link.id ? 'is-dragging' : ''
@@ -924,7 +958,7 @@ function App() {
                   draggable={isEditing}
                   onDragStart={(event) => handleLinkDragStart(event, link.id)}
                   onDragOver={(event) => handleLinkDragOver(event, link.id)}
-                  onDrop={(event) => handleLinkDrop(event, activeGroup.id, link.id)}
+                  onDrop={(event) => handleLinkDrop(event, groupId, link.id)}
                   onDragEnd={resetLinkDrag}
                   key={link.id}
                 >
@@ -933,7 +967,7 @@ function App() {
                       <button
                         type="button"
                         className="quick-icon-button"
-                        onClick={() => startQuickEditLink(activeGroup.id, link)}
+                        onClick={() => startQuickEditLink(groupId, link)}
                         aria-label="编辑网站"
                         title="编辑网站"
                       >
@@ -942,7 +976,7 @@ function App() {
                       <button
                         type="button"
                         className="quick-icon-button danger"
-                        onClick={() => deleteLink(activeGroup.id, link.id)}
+                        onClick={() => deleteLink(groupId, link.id)}
                         aria-label="删除网站"
                         title="删除网站"
                       >
@@ -956,7 +990,7 @@ function App() {
                     href={normalizeUrl(link.url)}
                     target="_blank"
                     rel="noreferrer noopener"
-                    onClick={(event) => handleLinkClick(event, activeGroup.id, link.id)}
+                    onClick={(event) => handleLinkClick(event, groupId, link.id)}
                   >
                     <img
                       src={link.icon || faviconUrl(link.url)}
@@ -968,6 +1002,9 @@ function App() {
                     <span>{link.title}</span>
                     <small>{normalizeUrl(link.url).replace(/^https?:\/\//, '')}</small>
                     <span className="click-count">{link.clickCount ?? 0}</span>
+                    {isGlobalSearch ? (
+                      <em className="link-group-name">{groupName}</em>
+                    ) : null}
                   </a>
                 </article>
               ))}
@@ -985,9 +1022,13 @@ function App() {
               ) : null}
             </div>
 
-            {visibleLinks.length === 0 ? (
+            {visibleLinkItems.length === 0 ? (
               <section className="empty-panel">
-                {query.trim() ? '当前分组没有匹配的网站' : '当前分组还没有网站'}
+                {query.trim()
+                  ? isGlobalSearch
+                    ? '全部分组没有匹配的网站'
+                    : '当前分组没有匹配的网站'
+                  : '当前分组还没有网站'}
               </section>
             ) : null}
           </section>
