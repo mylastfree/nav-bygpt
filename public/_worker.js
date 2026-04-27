@@ -1,6 +1,6 @@
 const DASHBOARD_KEY = 'dashboard'
 const BACKUP_PREFIX = 'backup:'
-const APP_VERSION = '0.0.17'
+const APP_VERSION = '0.0.18'
 const MAX_BODY_BYTES = 10 * 1024 * 1024
 const MAX_GROUPS = 500
 const MAX_TOTAL_LINKS = 5000

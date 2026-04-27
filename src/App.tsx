@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react'
 import {
+  type AdminTokenStorageMode,
   checkLinks,
   clearAdminToken,
   downloadBackup,
@@ -482,11 +483,26 @@ function App() {
   function startEditing() {
     if (adminToken) {
       setIsEditing(true)
-      setStatus('已进入编辑模式')
+      setStatus(
+        `已进入编辑模式，密码保存方式：${
+          adminTokenMode === 'device' ? '记住此设备' : '本次会话'
+        }`,
+      )
       return
     }
 
     setShowTokenForm(true)
+  }
+
+  function updateAdminTokenMode(mode: AdminTokenStorageMode) {
+    setAdminTokenMode(mode)
+
+    if (!adminToken) {
+      return
+    }
+
+    saveAdminToken(adminToken, mode)
+    setStatus(`密码保存方式已改为：${mode === 'device' ? '记住此设备' : '本次会话'}`)
   }
 
   function lockEditing() {
@@ -1468,6 +1484,31 @@ function App() {
 
       {isEditing ? (
         <section className="editor-actions">
+          <div className="admin-token-mode-panel" aria-label="当前密码保存方式">
+            <span>密码保存方式：</span>
+            <div className="token-storage-options" role="radiogroup" aria-label="密码保存方式">
+              <label>
+                <input
+                  type="radio"
+                  name="active-admin-token-mode"
+                  value="session"
+                  checked={adminTokenMode === 'session'}
+                  onChange={() => updateAdminTokenMode('session')}
+                />
+                本次会话
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="active-admin-token-mode"
+                  value="device"
+                  checked={adminTokenMode === 'device'}
+                  onChange={() => updateAdminTokenMode('device')}
+                />
+                记住此设备
+              </label>
+            </div>
+          </div>
           <button type="button" className="ghost-button danger" onClick={forgetToken}>
             清除密码
           </button>

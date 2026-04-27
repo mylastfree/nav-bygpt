@@ -323,6 +323,26 @@ h2 {
   padding: 0;
 }
 
+.admin-token-mode-panel {
+  display: flex;
+  flex: 1 1 360px;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-token-mode-panel > span {
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.admin-token-mode-panel .token-storage-options label {
+  min-height: 36px;
+  padding: 6px 10px;
+}
+
 .batch-actions {
   display: flex;
   flex: 1 1 420px;
