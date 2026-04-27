@@ -21,4 +21,11 @@ describe('quick edit stylesheet contract', () => {
     expect(css).toContain('.add-card')
     expect(css).toContain('border-style: dashed')
   })
+
+  test('allows link titles to wrap without collapsing card layout', () => {
+    expect(css).toContain('.link-card-title')
+    expect(css).toMatch(/\.link-card-title[\s\S]*overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.link-card-title[\s\S]*display:\s*-webkit-box/)
+    expect(css).toMatch(/\.link-card-title[\s\S]*-webkit-line-clamp:\s*2/)
+  })
 })

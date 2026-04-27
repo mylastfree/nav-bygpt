@@ -1893,10 +1893,13 @@ function App() {
                       src={link.icon || faviconUrl(link.url)}
                       alt=""
                       onError={(event) => {
-                        event.currentTarget.style.display = 'none'
+                        event.currentTarget.style.visibility = 'hidden'
+                      }}
+                      onLoad={(event) => {
+                        event.currentTarget.style.visibility = 'visible'
                       }}
                     />
-                    <span>{link.title}</span>
+                    <span className="link-card-title">{link.title}</span>
                     <small>{normalizeUrl(link.url).replace(/^https?:\/\//, '')}</small>
                     <span className="click-count">{link.clickCount ?? 0}</span>
                     {isGlobalSearch ? (

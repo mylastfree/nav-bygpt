@@ -27,6 +27,12 @@ describe('quick edit app contract', () => {
     expect(appSource).toContain("current === sourceLinkId ? '' : current")
   })
 
+  test('keeps failed favicons from collapsing the title column', () => {
+    expect(appSource).toContain("className=\"link-card-title\"")
+    expect(appSource).toContain("event.currentTarget.style.visibility = 'hidden'")
+    expect(appSource).not.toContain("event.currentTarget.style.display = 'none'")
+  })
+
   test('offers undo and batch selected link operations in edit mode', () => {
     expect(appSource).toContain('type UndoEntry')
     expect(appSource).toContain('const [undoEntry, setUndoEntry]')
