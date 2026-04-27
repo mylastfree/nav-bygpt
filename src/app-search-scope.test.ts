@@ -25,7 +25,7 @@ describe('search scope contract', () => {
     expect(appSource).toContain("if (event.key === 'Escape')")
     expect(appSource).toContain("if (event.key !== 'Enter' || isEditing)")
     expect(appSource).toContain('const first = visibleLinkItems[0]')
-    expect(appSource).toContain('incrementLinkClickCount(current, first.groupId, first.link.id)')
+    expect(appSource).toContain('recordLinkClick(first.groupId, first.link.id)')
     expect(appSource).toContain("window.open(normalizeUrl(first.link.url), '_blank', 'noopener,noreferrer')")
     expect(appSource).toContain('onKeyDown={handleSearchKeyDown}')
   })

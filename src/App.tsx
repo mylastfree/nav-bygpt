@@ -1056,6 +1056,14 @@ function App() {
     setSelectedLinkIds(new Set())
   }
 
+  function recordLinkClick(groupId: string, linkId: string) {
+    if (!adminToken) {
+      return
+    }
+
+    updateDashboard((current) => incrementLinkClickCount(current, groupId, linkId))
+  }
+
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') {
       setQuery('')
@@ -1072,7 +1080,7 @@ function App() {
     }
 
     event.preventDefault()
-    updateDashboard((current) => incrementLinkClickCount(current, first.groupId, first.link.id))
+    recordLinkClick(first.groupId, first.link.id)
     window.open(normalizeUrl(first.link.url), '_blank', 'noopener,noreferrer')
   }
 
@@ -1092,7 +1100,7 @@ function App() {
       return
     }
 
-    updateDashboard((current) => incrementLinkClickCount(current, groupId, linkId))
+    recordLinkClick(groupId, linkId)
   }
 
   function handleLinkDragStart(
