@@ -50,8 +50,6 @@ describe('worker link check api', () => {
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
 
-      expect(init?.method).toBe('HEAD')
-
       if (url.includes('/limited')) {
         return new Response(null, { status: 403 })
       }
@@ -93,7 +91,7 @@ describe('worker link check api', () => {
           url: 'https://example.com',
           check: {
             status: 'ok',
-            reason: 'HTTP 204',
+            reason: 'HEAD HTTP 204',
             checkedAt: '2026-04-27T04:00:00.000Z',
           },
         },
@@ -102,7 +100,7 @@ describe('worker link check api', () => {
           url: 'https://example.com/limited',
           check: {
             status: 'limited',
-            reason: 'HTTP 403',
+            reason: 'GET HTTP 403',
             checkedAt: '2026-04-27T04:00:00.000Z',
           },
         },
@@ -111,14 +109,68 @@ describe('worker link check api', () => {
           url: 'https://example.com/missing',
           check: {
             status: 'broken',
-            reason: 'HTTP 404',
+            reason: 'GET HTTP 404',
             checkedAt: '2026-04-27T04:00:00.000Z',
           },
         },
       ],
     })
-    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    expect(fetchSpy).toHaveBeenCalledTimes(5)
     expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  test('falls back to GET before marking HEAD failures as broken', async () => {
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method
+
+      if (url.includes('/head-404-get-ok')) {
+        return new Response(null, { status: method === 'HEAD' ? 404 : 200 })
+      }
+
+      if (url.includes('/server-error')) {
+        return new Response(null, { status: 500 })
+      }
+
+      return new Response(null, { status: 204 })
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const response = await worker.fetch(
+      checkRequest({
+        links: [
+          { id: 'head-only', url: 'https://example.com/head-404-get-ok' },
+          { id: 'server-error', url: 'https://example.com/server-error' },
+        ],
+      }),
+      env(),
+      { waitUntil: vi.fn() },
+    )
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.results).toEqual([
+      {
+        id: 'head-only',
+        url: 'https://example.com/head-404-get-ok',
+        check: {
+          status: 'ok',
+          reason: 'GET HTTP 200',
+          checkedAt: '2026-04-27T04:00:00.000Z',
+        },
+      },
+      {
+        id: 'server-error',
+        url: 'https://example.com/server-error',
+        check: {
+          status: 'limited',
+          reason: 'GET HTTP 500',
+          checkedAt: '2026-04-27T04:00:00.000Z',
+        },
+      },
+    ])
+    expect(fetchSpy).toHaveBeenCalledTimes(4)
   })
 
   test('rejects invalid URLs and oversized batches before fetching', async () => {

@@ -133,7 +133,7 @@ const groupColorLabels: Record<GroupColor, string> = {
 
 const linkCheckStatusLabels: Record<NonNullable<LinkItem['check']>['status'], string> = {
   ok: '正常',
-  limited: '受限',
+  limited: '无法确认',
   broken: '疑似失效',
 }
 
@@ -364,14 +364,14 @@ function App() {
     }
 
     if (checkFilter === 'issues') {
-      return visibleLinkCheckResults.filter((item) => item.status !== 'ok')
+      return visibleLinkCheckResults.filter((item) => item.status === 'broken')
     }
 
     return visibleLinkCheckResults.filter((item) => item.status === checkFilter)
   }, [checkFilter, visibleLinkCheckResults])
 
   const problemLinkChecks = useMemo(() => {
-    return visibleLinkCheckResults.filter((check) => check.status !== 'ok')
+    return visibleLinkCheckResults.filter((check) => check.status === 'broken')
   }, [visibleLinkCheckResults])
 
   const problemLinkStatusById = useMemo(() => {
@@ -648,11 +648,16 @@ function App() {
       setCurrentLinkCheckResults(results)
       setHighlightedLinkId('')
 
-      const problemCount = results.filter((result) => result.status !== 'ok').length
+      const brokenCount = results.filter((result) => result.status === 'broken').length
+      const limitedCount = results.filter((result) => result.status === 'limited').length
+      const statusMessage =
+        brokenCount > 0
+          ? `已检测 ${results.length} 个网址，发现 ${brokenCount} 条疑似失效，${limitedCount} 条无法确认，保存后写入 Cloudflare KV`
+          : limitedCount > 0
+            ? `已检测 ${results.length} 个网址，没有发现明确失效，${limitedCount} 条无法确认，保存后写入 Cloudflare KV`
+            : `已检测 ${results.length} 个网址，暂未发现疑似失效，保存后写入 Cloudflare KV`
       setStatus(
-        problemCount > 0
-          ? `已检测 ${results.length} 个网址，发现 ${problemCount} 条疑似问题，保存后写入 Cloudflare KV`
-          : `已检测 ${results.length} 个网址，暂未发现疑似问题，保存后写入 Cloudflare KV`,
+        statusMessage,
       )
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '检测网址失败')
@@ -1464,7 +1469,7 @@ function App() {
             <span>重复组 {dashboardHealth.duplicateGroupCount}</span>
             <span>多余重复 {dashboardHealth.duplicateLinkCount}</span>
             <span>疑似失效 {dashboardHealth.brokenCount}</span>
-            <span>受限 {dashboardHealth.limitedCount}</span>
+            <span>无法确认 {dashboardHealth.limitedCount}</span>
             <span>正常 {dashboardHealth.okCount}</span>
             <span>本地约 {formatStorageSize(dashboardHealth.storageBytes)}</span>
           </div>
@@ -1793,7 +1798,7 @@ function App() {
                     <strong>网址维护</strong>
                     <span>
                       {visibleLinkCheckResults.length > 0
-                        ? `最近检测：正常 ${okLinkCount} 个，疑似失效 ${brokenLinkResults.length} 个，受限或异常 ${limitedLinkResults.length} 个`
+                        ? `最近检测：正常 ${okLinkCount} 个，疑似失效 ${brokenLinkResults.length} 个，无法确认 ${limitedLinkResults.length} 个`
                         : '批量检测当前全部网站，集中查看疑似失效链接。'}
                     </span>
                   </div>
@@ -1806,9 +1811,9 @@ function App() {
                         onChange={(event) => setCheckFilter(event.target.value as CheckFilter)}
                         aria-label="检测结果筛选"
                       >
-                        <option value="issues">只看问题</option>
+                        <option value="issues">只看疑似失效</option>
                         <option value="broken">疑似失效</option>
-                        <option value="limited">受限</option>
+                        <option value="limited">无法确认</option>
                         <option value="ok">正常</option>
                         <option value="all">全部</option>
                       </select>

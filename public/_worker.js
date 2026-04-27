@@ -7,7 +7,7 @@ const MAX_LINKS_PER_GROUP = 1000
 const MAX_LINK_CHECKS = 50
 const LINK_CHECK_TIMEOUT_MS = 6000
 const LINK_CHECK_CONCURRENCY = 6
-const LIMITED_HTTP_STATUS_CODES = [401, 403, 405, 429]
+const BROKEN_HTTP_STATUS_CODES = [404, 410]
 
 const CARD_LAYOUT_OPTIONS = ['comfortable', 'compact', 'list']
 const GROUP_COLOR_OPTIONS = ['slate', 'blue', 'green', 'amber', 'rose', 'purple', 'teal']
@@ -593,46 +593,77 @@ async function trimBackups(kv) {
 }
 
 async function fetchLinkHealth(url, checkedAt) {
+  const headProbe = await fetchLinkProbe(url, 'HEAD')
+  if (headProbe.type === 'http' && isHttpOk(headProbe.status)) {
+    return probeToLinkHealth(headProbe, 'HEAD', checkedAt)
+  }
+
+  const getProbe = await fetchLinkProbe(url, 'GET')
+  return probeToLinkHealth(getProbe, 'GET', checkedAt)
+}
+
+async function fetchLinkProbe(url, method) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), LINK_CHECK_TIMEOUT_MS)
 
   try {
     const response = await fetch(url, {
-      method: 'HEAD',
+      method,
       redirect: 'follow',
       signal: controller.signal,
+      headers:
+        method === 'GET'
+          ? {
+              accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              range: 'bytes=0-0',
+            }
+          : undefined,
     })
 
     return {
-      status: linkHealthStatusFromHttp(response.status),
-      reason: `HTTP ${response.status}`,
-      checkedAt,
+      type: 'http',
+      status: response.status,
     }
   } catch (error) {
     return {
-      status: 'limited',
+      type: 'error',
       reason: error && error.name === 'AbortError' ? 'Timeout' : 'Fetch failed',
-      checkedAt,
     }
   } finally {
     clearTimeout(timeout)
   }
 }
 
+function probeToLinkHealth(probe, method, checkedAt) {
+  if (probe.type === 'http') {
+    return {
+      status: linkHealthStatusFromHttp(probe.status),
+      reason: `${method} HTTP ${probe.status}`,
+      checkedAt,
+    }
+  }
+
+  return {
+    status: 'limited',
+    reason: `${method} ${probe.reason}`,
+    checkedAt,
+  }
+}
+
 function linkHealthStatusFromHttp(status) {
-  if (status >= 200 && status < 400) {
+  if (isHttpOk(status)) {
     return 'ok'
   }
 
-  if (LIMITED_HTTP_STATUS_CODES.includes(status)) {
-    return 'limited'
-  }
-
-  if (status >= 400) {
+  if (BROKEN_HTTP_STATUS_CODES.includes(status)) {
     return 'broken'
   }
 
   return 'limited'
+}
+
+function isHttpOk(status) {
+  return status >= 200 && status < 400
 }
 
 async function mapWithConcurrency(items, limit, mapper) {
