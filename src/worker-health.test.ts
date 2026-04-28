@@ -85,6 +85,7 @@ describe('worker health api', () => {
       worker: true,
       kvBound: true,
       adminTokenConfigured: true,
+      adminPasswordSource: 'env',
       dashboardExists: true,
       dashboardUpdatedAt: '2026-04-27T04:00:00.000Z',
       dashboardGroupCount: 1,

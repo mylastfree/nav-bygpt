@@ -368,6 +368,29 @@ h2 {
   padding: 6px 10px;
 }
 
+.password-change-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.password-change-warning {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.password-change-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.password-change-form .primary-button {
+  min-width: 104px;
+}
+
 .batch-actions {
   display: flex;
   flex: 1 1 420px;
@@ -1643,6 +1666,10 @@ button:focus-visible {
     min-width: 120px;
   }
 
+  .password-change-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   h1 {
     font-size: 28px;
   }
@@ -1661,6 +1688,10 @@ button:focus-visible {
 
   .select-input {
     width: 100%;
+  }
+
+  .password-change-form {
+    grid-template-columns: 1fr;
   }
 
   .group-section {

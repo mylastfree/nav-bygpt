@@ -10,6 +10,7 @@ import {
 } from 'react'
 import {
   type AdminTokenStorageMode,
+  changeAdminPassword,
   checkLinks,
   clearAdminToken,
   downloadBackup,
@@ -218,10 +219,16 @@ function App() {
   const [adminToken, setAdminToken] = useState(loadAdminToken)
   const [adminTokenMode, setAdminTokenMode] = useState(loadAdminTokenMode)
   const [tokenDraft, setTokenDraft] = useState('')
+  const [passwordDraft, setPasswordDraft] = useState({
+    current: '',
+    next: '',
+    confirm: '',
+  })
   const [showTokenForm, setShowTokenForm] = useState(false)
   const [status, setStatus] = useState('正在加载...')
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
   const [activeGroupId, setActiveGroupId] = useState('')
   const [quickEdit, setQuickEdit] = useState<QuickEditDraft | null>(null)
   const [draggingLinkId, setDraggingLinkId] = useState('')
@@ -511,6 +518,64 @@ function App() {
 
     saveAdminToken(adminToken, mode)
     setStatus(`密码保存方式已改为：${mode === 'device' ? '记住此设备' : '本次会话'}`)
+  }
+
+  async function handleChangeAdminPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const currentPassword = passwordDraft.current.trim()
+    const newPassword = passwordDraft.next.trim()
+    const confirmedPassword = passwordDraft.confirm.trim()
+
+    if (!currentPassword) {
+      setStatus('请输入当前管理员密码')
+      return
+    }
+
+    if (newPassword.length < 8) {
+      setStatus('新管理员密码至少需要 8 位')
+      return
+    }
+
+    if (newPassword !== confirmedPassword) {
+      setStatus('两次输入的新管理员密码不一致')
+      return
+    }
+
+    if (
+      !confirm(
+        '确认修改管理员密码吗？\n\n修改的是在线管理员密码，不会修改 Cloudflare 后台的 ADMIN_TOKEN。ADMIN_TOKEN 会继续作为救援密码。',
+      )
+    ) {
+      return
+    }
+
+    setIsChangingPassword(true)
+    setStatus('正在修改在线管理员密码...')
+
+    try {
+      const result = await changeAdminPassword(currentPassword, newPassword)
+      saveAdminToken(newPassword, adminTokenMode)
+      setAdminToken(newPassword)
+      setPasswordDraft({
+        current: '',
+        next: '',
+        confirm: '',
+      })
+      setHealthStatus((current) =>
+        current
+          ? {
+              ...current,
+              adminPasswordSource: result.adminPasswordSource,
+            }
+          : current,
+      )
+      setStatus('在线管理员密码已修改，本机保存的密码已更新')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '修改管理员密码失败')
+    } finally {
+      setIsChangingPassword(false)
+    }
   }
 
   function lockEditing() {
@@ -1613,6 +1678,68 @@ function App() {
         </section>
       ) : null}
 
+      {isEditing ? (
+        <section className="notice-panel compact-notice password-change-panel">
+          <div className="maintenance-heading">
+            <div>
+              <strong>修改管理员密码</strong>
+              <span>修改的是在线管理员密码，不会修改 Cloudflare 后台的 ADMIN_TOKEN。ADMIN_TOKEN 会继续作为救援密码。</span>
+            </div>
+          </div>
+          <p className="password-change-warning">
+            修改后，本浏览器会按当前“本次会话 / 记住此设备”设置保存新密码；Cloudflare
+            后台的 ADMIN_TOKEN 不会变化，仍可用于救援登录。
+          </p>
+          <form className="password-change-form" onSubmit={handleChangeAdminPassword}>
+            <label className="field-label">
+              当前密码
+              <input
+                type="password"
+                value={passwordDraft.current}
+                onChange={(event) =>
+                  setPasswordDraft((current) => ({
+                    ...current,
+                    current: event.target.value,
+                  }))
+                }
+                autoComplete="current-password"
+              />
+            </label>
+            <label className="field-label">
+              新密码
+              <input
+                type="password"
+                value={passwordDraft.next}
+                onChange={(event) =>
+                  setPasswordDraft((current) => ({
+                    ...current,
+                    next: event.target.value,
+                  }))
+                }
+                autoComplete="new-password"
+              />
+            </label>
+            <label className="field-label">
+              再输一次新密码
+              <input
+                type="password"
+                value={passwordDraft.confirm}
+                onChange={(event) =>
+                  setPasswordDraft((current) => ({
+                    ...current,
+                    confirm: event.target.value,
+                  }))
+                }
+                autoComplete="new-password"
+              />
+            </label>
+            <button type="submit" className="primary-button" disabled={isChangingPassword}>
+              {isChangingPassword ? '修改中' : '修改密码'}
+            </button>
+          </form>
+        </section>
+      ) : null}
+
       {isEditing && dashboardHealth ? (
         <section className="notice-panel health-panel">
           <div className="maintenance-heading">
@@ -1667,6 +1794,14 @@ function App() {
                 <span>部署 v{healthStatus.version}</span>
                 <span>KV {healthStatus.kvBound ? '已绑定' : '未绑定'}</span>
                 <span>密码 {healthStatus.adminTokenConfigured ? '已配置' : '未配置'}</span>
+                <span>
+                  密码来源{' '}
+                  {healthStatus.adminPasswordSource === 'kv'
+                    ? '在线密码'
+                    : healthStatus.adminPasswordSource === 'env'
+                      ? 'ADMIN_TOKEN'
+                      : '未配置'}
+                </span>
                 <span>线上网站 {healthStatus.dashboardLinkCount}</span>
               </>
             ) : null}

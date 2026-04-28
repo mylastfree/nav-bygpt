@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.23 - 2026-04-28
+
+- 增加编辑模式里的“修改管理员密码”面板，可以直接在线修改导航站管理员密码，不再必须进入 Cloudflare 后台改环境变量。
+- 新密码会以 PBKDF2-SHA-256 哈希形式保存到 `STARTPAGE_KV` 的 `admin:credential`，不会明文写入 KV。
+- Cloudflare 后台的 `ADMIN_TOKEN` 继续保留为救援密码；修改密码时会明确提示“改的是在线管理员密码，不会修改 ADMIN_TOKEN”。
+- `/api/health` 增加 `adminPasswordSource`，用于诊断当前管理员密码来源是 `env`、`kv` 还是未配置。
+
 ## 0.0.22 - 2026-04-27
 
 - 有管理员密码时，普通浏览点击网站会通过受保护的轻量 API 自动保存点击次数，不再要求进入编辑模式后手动保存。

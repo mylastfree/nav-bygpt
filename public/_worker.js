@@ -1,7 +1,12 @@
 const DASHBOARD_KEY = 'dashboard'
 const BACKUP_PREFIX = 'backup:'
-const APP_VERSION = '0.0.22'
+const ADMIN_CREDENTIAL_KEY = 'admin:credential'
+const APP_VERSION = '0.0.23'
 const MAX_BODY_BYTES = 10 * 1024 * 1024
+const MAX_PASSWORD_BODY_BYTES = 16 * 1024
+const MAX_PASSWORD_LENGTH = 256
+const ADMIN_PASSWORD_ALGORITHM = 'PBKDF2-SHA-256'
+const ADMIN_PASSWORD_ITERATIONS = 100000
 const MAX_GROUPS = 500
 const MAX_TOTAL_LINKS = 5000
 const MAX_LINKS_PER_GROUP = 1000
@@ -93,6 +98,10 @@ export default {
       return checkLinks(request, env)
     }
 
+    if (url.pathname === '/api/admin/password' && request.method === 'POST') {
+      return changeAdminPassword(request, env)
+    }
+
     if (url.pathname.startsWith('/api/')) {
       return text('Not found.', 404)
     }
@@ -111,7 +120,7 @@ async function readDashboard(env) {
 }
 
 async function writeDashboard(request, env, context) {
-  const authError = requireAdmin(request, env)
+  const authError = await requireAdmin(request, env)
   if (authError) {
     return authError
   }
@@ -166,12 +175,21 @@ async function writeDashboard(request, env, context) {
 async function health(env) {
   const kvBound = Boolean(env.STARTPAGE_KV)
   const adminTokenConfigured = Boolean(env.ADMIN_TOKEN)
+  let adminPasswordSource = adminTokenConfigured ? 'env' : 'none'
   let dashboardExists = false
   let dashboardUpdatedAt = ''
   let dashboardGroupCount = 0
   let dashboardLinkCount = 0
+  let onlineCredentialConfigured = false
 
   if (kvBound) {
+    onlineCredentialConfigured = Boolean(await readAdminCredential(env))
+    adminPasswordSource = onlineCredentialConfigured
+      ? 'kv'
+      : adminTokenConfigured
+        ? 'env'
+        : 'none'
+
     const raw = await env.STARTPAGE_KV.get(DASHBOARD_KEY)
     dashboardExists = Boolean(raw)
 
@@ -191,11 +209,12 @@ async function health(env) {
   }
 
   return json({
-    ok: kvBound && adminTokenConfigured,
+    ok: kvBound && (adminTokenConfigured || onlineCredentialConfigured),
     version: APP_VERSION,
     worker: true,
     kvBound,
     adminTokenConfigured,
+    adminPasswordSource,
     dashboardExists,
     dashboardUpdatedAt,
     dashboardGroupCount,
@@ -203,8 +222,65 @@ async function health(env) {
   })
 }
 
+async function changeAdminPassword(request, env) {
+  const authError = await requireAdmin(request, env)
+  if (authError) {
+    return authError
+  }
+
+  const contentLength = Number(request.headers.get('content-length') || '0')
+  if (contentLength > MAX_PASSWORD_BODY_BYTES) {
+    return text('Password request is too large.', 413)
+  }
+
+  const body = await request.text()
+  if (new TextEncoder().encode(body).length > MAX_PASSWORD_BODY_BYTES) {
+    return text('Password request is too large.', 413)
+  }
+
+  let parsed
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return text('Invalid JSON.', 400)
+  }
+
+  const currentPassword =
+    typeof parsed?.currentPassword === 'string' ? parsed.currentPassword.trim() : ''
+  const newPassword =
+    typeof parsed?.newPassword === 'string' ? parsed.newPassword.trim() : ''
+
+  if (!currentPassword) {
+    return text('Current admin password is required.', 400)
+  }
+
+  if (newPassword.length < 8) {
+    return text('New admin password must be at least 8 characters.', 400)
+  }
+
+  if (newPassword.length > MAX_PASSWORD_LENGTH) {
+    return text('New admin password is too long.', 400)
+  }
+
+  if (!(await verifyEffectiveAdminPassword(currentPassword, env))) {
+    return text('Unauthorized.', 401)
+  }
+
+  const updatedAt = new Date().toISOString()
+  const credential = await createAdminCredential(newPassword, updatedAt)
+  await env.STARTPAGE_KV.put(ADMIN_CREDENTIAL_KEY, JSON.stringify(credential), {
+    metadata: { updatedAt },
+  })
+
+  return json({
+    mode: 'cloud',
+    updatedAt,
+    adminPasswordSource: 'kv',
+  })
+}
+
 async function listBackups(request, env) {
-  const authError = requireAdmin(request, env)
+  const authError = await requireAdmin(request, env)
   if (authError) {
     return authError
   }
@@ -244,7 +320,7 @@ async function listBackups(request, env) {
 }
 
 async function downloadBackup(request, env) {
-  const authError = requireAdmin(request, env)
+  const authError = await requireAdmin(request, env)
   if (authError) {
     return authError
   }
@@ -278,7 +354,7 @@ async function downloadBackup(request, env) {
 }
 
 async function restoreBackup(request, env, context) {
-  const authError = requireAdmin(request, env)
+  const authError = await requireAdmin(request, env)
   if (authError) {
     return authError
   }
@@ -352,7 +428,7 @@ async function restoreBackup(request, env, context) {
 }
 
 async function recordLinkClick(request, env) {
-  const authError = requireAdmin(request, env)
+  const authError = await requireAdmin(request, env)
   if (authError) {
     return authError
   }
@@ -441,7 +517,7 @@ async function recordLinkClick(request, env) {
 }
 
 async function checkLinks(request, env) {
-  const authError = requireAdmin(request, env)
+  const authError = await requireAdmin(request, env)
   if (authError) {
     return authError
   }
@@ -725,20 +801,170 @@ function cleanText(value, maxLength) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
 }
 
-function requireAdmin(request, env) {
+async function requireAdmin(request, env) {
   if (!env.STARTPAGE_KV) {
     return text('STARTPAGE_KV binding is not configured.', 500)
   }
 
-  if (!env.ADMIN_TOKEN) {
-    return text('ADMIN_TOKEN is not configured.', 500)
+  if (!(await hasAdminPassword(env))) {
+    return text('Admin password is not configured.', 500)
   }
 
-  if (request.headers.get('authorization') !== `Bearer ${env.ADMIN_TOKEN}`) {
+  const token = readBearerToken(request)
+  if (!token || !(await verifyEffectiveAdminPassword(token, env))) {
     return text('Unauthorized.', 401)
   }
 
   return null
+}
+
+async function hasAdminPassword(env) {
+  return Boolean(env.ADMIN_TOKEN || (await readAdminCredential(env)))
+}
+
+function readBearerToken(request) {
+  const header = request.headers.get('authorization') || ''
+  const prefix = 'Bearer '
+
+  return header.startsWith(prefix) ? header.slice(prefix.length).trim() : ''
+}
+
+async function verifyEffectiveAdminPassword(password, env) {
+  if (!env.STARTPAGE_KV) {
+    return false
+  }
+
+  const credential = await readAdminCredential(env)
+  const matchesOnlinePassword = credential
+    ? await verifyAdminCredential(password, credential)
+    : false
+  const matchesRescuePassword = env.ADMIN_TOKEN
+    ? constantTimeEqualText(password, env.ADMIN_TOKEN)
+    : false
+
+  return matchesOnlinePassword || matchesRescuePassword
+}
+
+async function readAdminCredential(env) {
+  if (!env.STARTPAGE_KV) {
+    return null
+  }
+
+  const raw = await env.STARTPAGE_KV.get(ADMIN_CREDENTIAL_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const credential = JSON.parse(raw)
+    if (
+      credential?.algorithm !== ADMIN_PASSWORD_ALGORITHM ||
+      typeof credential.salt !== 'string' ||
+      typeof credential.hash !== 'string' ||
+      !Number.isInteger(credential.iterations) ||
+      credential.iterations < 1
+    ) {
+      return null
+    }
+
+    return credential
+  } catch {
+    return null
+  }
+}
+
+async function createAdminCredential(password, updatedAt) {
+  const salt = new Uint8Array(16)
+  crypto.getRandomValues(salt)
+  const hash = await derivePasswordHash(password, salt, ADMIN_PASSWORD_ITERATIONS)
+
+  return {
+    algorithm: ADMIN_PASSWORD_ALGORITHM,
+    iterations: ADMIN_PASSWORD_ITERATIONS,
+    salt: bytesToBase64(salt),
+    hash: bytesToBase64(hash),
+    updatedAt,
+  }
+}
+
+async function verifyAdminCredential(password, credential) {
+  try {
+    const salt = base64ToBytes(credential.salt)
+    const expectedHash = base64ToBytes(credential.hash)
+    const actualHash = await derivePasswordHash(password, salt, credential.iterations)
+
+    return constantTimeEqualBytes(actualHash, expectedHash)
+  } catch {
+    return false
+  }
+}
+
+async function derivePasswordHash(password, salt, iterations) {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  )
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      hash: 'SHA-256',
+      salt,
+      iterations,
+    },
+    keyMaterial,
+    256,
+  )
+
+  return new Uint8Array(derivedBits)
+}
+
+function constantTimeEqualText(left, right) {
+  return constantTimeEqualBytes(
+    new TextEncoder().encode(left),
+    new TextEncoder().encode(right),
+  )
+}
+
+function constantTimeEqualBytes(left, right) {
+  const length = Math.max(left.length, right.length)
+  let diff = left.length ^ right.length
+
+  for (let index = 0; index < length; index += 1) {
+    diff |= (left[index] || 0) ^ (right[index] || 0)
+  }
+
+  return diff === 0
+}
+
+function bytesToBase64(bytes) {
+  let binary = ''
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+
+  if (typeof btoa === 'function') {
+    return btoa(binary)
+  }
+
+  return Buffer.from(binary, 'binary').toString('base64')
+}
+
+function base64ToBytes(value) {
+  const binary =
+    typeof atob === 'function'
+      ? atob(value)
+      : Buffer.from(value, 'base64').toString('binary')
+  const bytes = new Uint8Array(binary.length)
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+
+  return bytes
 }
 
 function countLinks(data) {

@@ -85,12 +85,17 @@ export type SaveResult = {
   updatedAt: string
 }
 
+export type ChangeAdminPasswordResult = SaveResult & {
+  adminPasswordSource: 'kv'
+}
+
 export type HealthStatus = {
   ok: boolean
   version: string
   worker: boolean
   kvBound: boolean
   adminTokenConfigured: boolean
+  adminPasswordSource: 'none' | 'env' | 'kv'
   dashboardExists: boolean
   dashboardUpdatedAt: string
   dashboardGroupCount: number

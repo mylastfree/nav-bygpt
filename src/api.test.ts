@@ -5,6 +5,7 @@ import {
   LOCAL_DASHBOARD_KEY,
 } from './dashboard'
 import {
+  changeAdminPassword,
   checkLinks,
   clearAdminToken,
   downloadBackup,
@@ -178,6 +179,7 @@ describe('cloud dashboard api', () => {
       worker: true,
       kvBound: true,
       adminTokenConfigured: true,
+      adminPasswordSource: 'env',
       dashboardExists: true,
       dashboardUpdatedAt: '2026-04-27T00:00:00.000Z',
       dashboardGroupCount: 1,
@@ -329,6 +331,38 @@ describe('cloud dashboard api', () => {
       body: JSON.stringify({
         groupId: 'daily',
         linkId: 'github',
+      }),
+    })
+  })
+
+  test('changes the online admin password through the protected Cloudflare endpoint', async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          mode: 'cloud',
+          updatedAt: '2026-04-28T00:00:01.000Z',
+          adminPasswordSource: 'kv',
+        }),
+        { status: 200 },
+      )
+    })
+
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(changeAdminPassword('old-secret', 'new-secret-123')).resolves.toEqual({
+      mode: 'cloud',
+      updatedAt: '2026-04-28T00:00:01.000Z',
+      adminPasswordSource: 'kv',
+    })
+    expect(fetchSpy).toHaveBeenCalledWith('/api/admin/password', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer old-secret',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        currentPassword: 'old-secret',
+        newPassword: 'new-secret-123',
       }),
     })
   })

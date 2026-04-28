@@ -8,6 +8,7 @@ import {
 } from './dashboard'
 import type {
   BackupSummary,
+  ChangeAdminPasswordResult,
   DashboardData,
   HealthStatus,
   LinkCheckRequestItem,
@@ -197,6 +198,41 @@ export async function loadHealth(): Promise<HealthStatus> {
 
   const message = await response.text()
   throw new Error(message || `读取部署诊断失败：HTTP ${response.status}`)
+}
+
+export async function changeAdminPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<ChangeAdminPasswordResult> {
+  const current = currentPassword.trim()
+  const next = newPassword.trim()
+
+  if (!current) {
+    throw new Error('请输入当前管理员密码')
+  }
+
+  if (next.length < 8) {
+    throw new Error('新管理员密码至少需要 8 位')
+  }
+
+  const response = await fetch('/api/admin/password', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${current}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      currentPassword: current,
+      newPassword: next,
+    }),
+  })
+
+  if (response.ok) {
+    return (await response.json()) as ChangeAdminPasswordResult
+  }
+
+  const message = await response.text()
+  throw new Error(message || `修改管理员密码失败：HTTP ${response.status}`)
 }
 
 export async function downloadBackup(
