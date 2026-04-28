@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.24 - 2026-04-28
+
+- 增加 `docs/deployment-recovery.md`，集中记录 Cloudflare Pages Direct Upload、`STARTPAGE_KV`、`ADMIN_TOKEN` 救援密码、`/api/health` 诊断和空白页排查步骤。
+- 将 KV 备份列表拆到独立 `BackupsPanel` 组件，并增加恢复前的页面内确认区，对比当前数据和备份数据的更新时间、分组数、网站数与恢复后数量变化。
+- 管理员登录和修改密码区域补充更明确的“忘记在线密码 / 使用 ADMIN_TOKEN 救援 / ADMIN_TOKEN 只能去 Cloudflare 后台修改”提示。
+- 增加备份恢复对比 helper 测试，降低后续继续拆分 `App.tsx` 时改坏恢复确认逻辑的风险。
+
 ## 0.0.23 - 2026-04-28
 
 - 增加编辑模式里的“修改管理员密码”面板，可以直接在线修改导航站管理员密码，不再必须进入 Cloudflare 后台改环境变量。

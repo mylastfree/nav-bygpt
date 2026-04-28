@@ -25,6 +25,8 @@ import {
   saveLinkClick,
   saveLocalDashboard,
 } from './api'
+import { compareRestoreDashboard } from './backup'
+import { BackupsPanel, type RestorePreviewState } from './components/BackupsPanel'
 import {
   CARD_LAYOUT_OPTIONS,
   GROUP_COLOR_OPTIONS,
@@ -239,6 +241,7 @@ function App() {
   const [pendingImport, setPendingImport] = useState<PendingImportDraft | null>(null)
   const [backups, setBackups] = useState<BackupSummary[]>([])
   const [showBackups, setShowBackups] = useState(false)
+  const [restorePreview, setRestorePreview] = useState<RestorePreviewState | null>(null)
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null)
   const [isLoadingBackups, setIsLoadingBackups] = useState(false)
   const [isRestoringBackup, setIsRestoringBackup] = useState(false)
@@ -633,6 +636,7 @@ function App() {
 
   async function openBackupPanel() {
     setIsLoadingBackups(true)
+    setRestorePreview(null)
     setStatus('正在读取备份...')
 
     try {
@@ -671,27 +675,46 @@ function App() {
     }
   }
 
-  function getRestoreBackupConfirmation(backup: BackupSummary) {
-    return [
-      '恢复这个备份？',
-      '',
-      `备份时间：${formatBackupDate(backup.createdAt)}`,
-      `分组：${backup.groupCount}`,
-      `网站：${backup.linkCount}`,
-      '',
-      '恢复前会先自动备份当前 KV 数据。',
-    ].join('\n')
-  }
-
-  async function restoreBackupById(backup: BackupSummary) {
+  async function previewRestoreBackup(backup: BackupSummary) {
     if (!dashboard) {
       return
     }
 
-    if (!confirm(getRestoreBackupConfirmation(backup))) {
+    setShowBackups(true)
+    setRestorePreview({
+      backup,
+      comparison: null,
+      isLoading: true,
+      error: '',
+    })
+    setStatus('正在读取备份详情...')
+
+    try {
+      const backupDashboard = await downloadBackup(backup.id, adminToken)
+      setRestorePreview({
+        backup,
+        comparison: compareRestoreDashboard(dashboard, backupDashboard),
+        isLoading: false,
+        error: '',
+      })
+      setStatus('请确认备份恢复')
+    } catch (error) {
+      setRestorePreview({
+        backup,
+        comparison: null,
+        isLoading: false,
+        error: error instanceof Error ? error.message : '读取备份详情失败',
+      })
+      setStatus(error instanceof Error ? error.message : '读取备份详情失败')
+    }
+  }
+
+  async function confirmRestoreBackup() {
+    if (!dashboard || !restorePreview) {
       return
     }
 
+    const backup = restorePreview.backup
     const previousDashboard = dashboard
     setIsRestoringBackup(true)
     setStatus('正在恢复备份...')
@@ -706,6 +729,7 @@ function App() {
       setSelectedLinkIds(new Set())
       setCurrentLinkCheckResults([])
       setShowBackups(false)
+      setRestorePreview(null)
       setHasUnsavedChanges(false)
       setStatus(`已恢复备份，更新时间 ${formatBackupDate(result.updatedAt)}`)
     } catch (error) {
@@ -721,7 +745,7 @@ function App() {
       return
     }
 
-    await restoreBackupById(latestNonEmptyBackup)
+    await previewRestoreBackup(latestNonEmptyBackup)
   }
 
   async function runLinkCheck() {
@@ -1497,6 +1521,7 @@ function App() {
                 onClick={() => {
                   if (showBackups) {
                     setShowBackups(false)
+                    setRestorePreview(null)
                     return
                   }
 
@@ -1566,6 +1591,9 @@ function App() {
               记住此设备
             </label>
           </div>
+          <p className="admin-rescue-note">
+            忘记在线密码时，可以输入 Cloudflare Pages 环境变量 ADMIN_TOKEN 作为救援密码；登录后再到“修改管理员密码”重新设置在线密码。
+          </p>
           <button type="submit" className="primary-button">
             解锁
           </button>
@@ -1689,6 +1717,10 @@ function App() {
           <p className="password-change-warning">
             修改后，本浏览器会按当前“本次会话 / 记住此设备”设置保存新密码；Cloudflare
             后台的 ADMIN_TOKEN 不会变化，仍可用于救援登录。
+          </p>
+          <p className="password-rescue-note">
+            救援说明：在线密码保存在 KV 里，无法反查明文；如果忘记了，就用 CF 后台的 ADMIN_TOKEN
+            登录本页面，再在这里设置一个新的在线密码。ADMIN_TOKEN 本身只能去 Cloudflare 后台修改。
           </p>
           <form className="password-change-form" onSubmit={handleChangeAdminPassword}>
             <label className="field-label">
@@ -1890,76 +1922,19 @@ function App() {
       ) : null}
 
       {isEditing && showBackups ? (
-        <section className="notice-panel compact-notice backup-panel">
-          <div className="maintenance-heading">
-            <div>
-              <strong>KV 备份</strong>
-              <span>保存、导入和恢复前会自动留下备份；恢复动作仍需要管理员密码。</span>
-            </div>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => void openBackupPanel()}
-              disabled={isLoadingBackups || isRestoringBackup}
-            >
-              刷新
-            </button>
-          </div>
-          {latestNonEmptyBackup ? (
-            <div className="backup-recovery-callout">
-              <div>
-                <strong>最近非空备份</strong>
-                <span>
-                  {formatBackupDate(latestNonEmptyBackup.createdAt)} ·{' '}
-                  {latestNonEmptyBackup.groupCount} 个分组 ·{' '}
-                  {latestNonEmptyBackup.linkCount} 个网站
-                </span>
-              </div>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => void restoreLatestNonEmptyBackup()}
-                disabled={isRestoringBackup}
-              >
-                恢复最近非空备份
-              </button>
-            </div>
-          ) : null}
-          {backups.length > 0 ? (
-            <div className="backup-list">
-              {backups.map((backup) => (
-                <article className="backup-card" key={backup.id}>
-                  <div className="backup-main">
-                    <strong>{formatBackupDate(backup.createdAt)}</strong>
-                    <span className="backup-meta">
-                      {backup.groupCount} 个分组 · {backup.linkCount} 个网站
-                    </span>
-                  </div>
-                  <div className="row-actions">
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => void downloadBackupById(backup)}
-                      disabled={isRestoringBackup}
-                    >
-                      下载 JSON
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => void restoreBackupById(backup)}
-                      disabled={isRestoringBackup}
-                    >
-                      恢复
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="backup-empty">还没有可恢复的 KV 备份。</p>
-          )}
-        </section>
+        <BackupsPanel
+          backups={backups}
+          latestNonEmptyBackup={latestNonEmptyBackup}
+          isLoadingBackups={isLoadingBackups}
+          isRestoringBackup={isRestoringBackup}
+          restorePreview={restorePreview}
+          onRefresh={() => void openBackupPanel()}
+          onDownload={(backup) => void downloadBackupById(backup)}
+          onPreviewRestore={(backup) => void previewRestoreBackup(backup)}
+          onConfirmRestore={() => void confirmRestoreBackup()}
+          onCancelRestore={() => setRestorePreview(null)}
+          onRestoreLatest={() => void restoreLatestNonEmptyBackup()}
+        />
       ) : null}
 
       <section className="dashboard-layout">

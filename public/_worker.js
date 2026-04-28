@@ -1,7 +1,7 @@
 const DASHBOARD_KEY = 'dashboard'
 const BACKUP_PREFIX = 'backup:'
 const ADMIN_CREDENTIAL_KEY = 'admin:credential'
-const APP_VERSION = '0.0.23'
+const APP_VERSION = '0.0.24'
 const MAX_BODY_BYTES = 10 * 1024 * 1024
 const MAX_PASSWORD_BODY_BYTES = 16 * 1024
 const MAX_PASSWORD_LENGTH = 256
